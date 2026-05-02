@@ -1,0 +1,18 @@
+resolution: [512, 512]
+fps: 60
+duration_frames: 60
+views:
+  count: 3
+  elevation_deg: 25.0
+  azimuth_offsets_deg: [0.0, 120.0, 240.0]
+  radius_m: 2.4
+camera:
+  focal_length_mm: 35.0
+  sensor_width_mm: 32.0
+outputs:
+  rgb_format: png
+  mask_format: png8
+  depth_format: exr_half
+lighting:
+  environment_strength: 0.8
+  key_light_power: 450.0

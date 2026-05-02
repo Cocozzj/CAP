@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+4DTokenizer-Dataset/
+Dataset/
+dataset_builder/.eggs/
+dataset_builder/*.egg-info/

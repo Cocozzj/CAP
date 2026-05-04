@@ -1,0 +1,161 @@
+# Compositional action sequences for Dataset-A.
+#
+# A composition chains 2 or more atomic actions on the *same joint of the same
+# object*. The qpos trajectory is built by concatenating min-jerk segments
+# between consecutive sub-action targets.
+#
+# Two tiers:
+#   compositions_train_eval  -- short (2-step) sequences that participate in
+#                               train / val / test_iid splits like atomics.
+#   compositions_eval_only   -- longer (3-step+) sequences that ONLY appear in
+#                               a dedicated test_compositional_long split, used
+#                               to evaluate zero-shot compositional
+#                               generalization to longer chains.
+#
+# Time layout for a 13s composition with N sub-actions:
+#   [pre_settle] [motion_1] [inter] [motion_2] [inter] ... [motion_N] [post_settle]
+# Inter and post settle durations are sampled per trajectory; motion durations
+# are budget-shared across the N sub-actions.
+
+defaults:
+  total_duration_seconds: 13.0
+  pre_settle_range: [0.5, 1.5]
+  inter_action_settle_range: [0.3, 0.8]
+  post_settle_range: [3.0, 5.0]
+  min_motion_seconds_per_step: 1.0    # floor; we'll shrink settles before going below
+
+# ---------------------------------------------------------------- 2-step (in train)
+compositions_train_eval:
+
+  - name: open_close
+    base_tasks: [open, close]
+    applies_to:
+      - Door
+      - StorageFurniture_Door
+      - Refrigerator
+      - Microwave
+      - Oven
+      - Dishwasher
+      - Laptop
+      - Suitcase
+      - Box
+      - Window
+      - TrashCan
+    trajectories_per_pair: 3
+
+  - name: close_open
+    base_tasks: [close, open]
+    applies_to:
+      - Door
+      - StorageFurniture_Door
+      - Refrigerator
+      - Microwave
+      - Oven
+      - Dishwasher
+      - Laptop
+      - Suitcase
+      - Box
+      - Window
+      - TrashCan
+    trajectories_per_pair: 3
+
+  - name: pull_push
+    base_tasks: [pull, push]
+    applies_to:
+      - Drawer
+      - StorageFurniture_Drawer
+      - Dishwasher
+      - Window
+    trajectories_per_pair: 3
+
+  - name: push_pull
+    base_tasks: [push, pull]
+    applies_to:
+      - Drawer
+      - StorageFurniture_Drawer
+      - Dishwasher
+      - Window
+    trajectories_per_pair: 3
+
+# ---------------------------------------------------------------- 3-step (eval-only)
+# These trajectories NEVER appear in train/val/test_iid. They land in a
+# dedicated test_compositional_long split for zero-shot generalization eval.
+
+compositions_eval_only:
+
+  - name: open_close_open
+    base_tasks: [open, close, open]
+    applies_to:
+      - Door
+      - StorageFurniture_Door
+      - Refrigerator
+      - Microwave
+      - Laptop
+      - Suitcase
+      - Box
+      - Window
+    trajectories_per_pair: 1
+
+  - name: close_open_close
+    base_tasks: [close, open, close]
+    applies_to:
+      - Door
+      - StorageFurniture_Door
+      - Refrigerator
+      - Microwave
+      - Laptop
+      - Suitcase
+      - Box
+      - Window
+    trajectories_per_pair: 1
+
+  - name: pull_push_pull
+    base_tasks: [pull, push, pull]
+    applies_to:
+      - Drawer
+      - StorageFurniture_Drawer
+      - Window
+    trajectories_per_pair: 1
+
+  - name: open_open_more
+    base_tasks: [open, open]   # second open continues from where first ended
+    applies_to:
+      - Door
+      - StorageFurniture_Door
+      - Microwave
+      - Refrigerator
+    trajectories_per_pair: 1
+
+  # ---- 4-step (further along the compositional length curve)
+  # Each motion phase shrinks to ~2 seconds. Limit to the most reliable categories
+  # to avoid noisy results from physically-sensitive objects.
+
+  - name: open_close_open_close
+    base_tasks: [open, close, open, close]
+    applies_to:
+      - Door
+      - StorageFurniture_Door
+      - Refrigerator
+      - Microwave
+      - Laptop
+      - Window
+    trajectories_per_pair: 1
+
+  - name: close_open_close_open
+    base_tasks: [close, open, close, open]
+    applies_to:
+      - Door
+      - StorageFurniture_Door
+      - Refrigerator
+      - Microwave
+      - Laptop
+      - Window
+    trajectories_per_pair: 1
+
+  - name: pull_push_pull_push
+    base_tasks: [pull, push, pull, push]
+    applies_to:
+      - Drawer
+      - StorageFurniture_Drawer
+      - Window
+    trajectories_per_pair: 1

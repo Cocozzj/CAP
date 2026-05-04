@@ -1,0 +1,137 @@
+# Task taxonomy for Dataset-A.
+#
+# Each trajectory is 13 seconds long total (per PDF), but the actual joint
+# motion only takes 2-5 seconds. We pad with a settle period before and after
+# so the encoder has frames where "nothing is happening" — this matters for
+# learning task boundaries.
+#
+# Layout:
+#   [pre_settle (2-3s)] [motion (2-5s)] [post_settle (5-9s)]
+#   total = 13 s
+#
+# `motion_duration_range`: how long the actual joint motion lasts
+# `pre_settle_range`:      static seconds at the start (object in start state)
+# `post_settle_range`:     static seconds at the end (object held in end state)
+
+defaults:
+  total_duration_seconds: 13.0
+  pre_settle_range: [1.5, 3.0]      # seconds of static frames at start
+  post_settle_range: [5.0, 8.0]     # seconds of static frames at end
+
+tasks:
+  - name: open
+    applies_to:
+      - Door
+      - StorageFurniture_Door
+      - Refrigerator
+      - Microwave
+      - Oven
+      - Dishwasher
+      - Laptop
+      - Suitcase
+      - Box
+      - Window
+      - TrashCan
+    direction: open
+    target_fraction_range: [0.6, 1.0]   # randomize how far to open
+    motion_duration_range: [2.0, 4.0]   # seconds, fits inside 13s total with padding
+    velocity_profile: smooth_minimum_jerk
+    randomize:
+      contact_jitter_m: 0.02
+      pull_dir_jitter_deg: 10
+      speed_factor_range: [0.7, 1.3]
+
+  - name: close
+    applies_to:
+      - Door
+      - StorageFurniture_Door
+      - Refrigerator
+      - Microwave
+      - Oven
+      - Dishwasher
+      - Laptop
+      - Suitcase
+      - Box
+      - Window
+      - TrashCan
+    direction: close
+    start_from_open_fraction: [0.6, 1.0]   # start in a partial-open state
+    target_fraction: 0.0
+    motion_duration_range: [2.0, 4.0]
+    velocity_profile: smooth_minimum_jerk
+    randomize:
+      contact_jitter_m: 0.02
+      push_dir_jitter_deg: 10
+      speed_factor_range: [0.7, 1.3]
+
+  - name: pull
+    applies_to:
+      - Drawer
+      - StorageFurniture_Drawer
+      - Dishwasher                       # rack
+      - Window                           # sash
+    direction: extend
+    target_fraction_range: [0.6, 1.0]
+    motion_duration_range: [2.0, 4.0]
+    velocity_profile: smooth_minimum_jerk
+    randomize:
+      contact_jitter_m: 0.015
+      pull_dir_jitter_deg: 8
+      speed_factor_range: [0.7, 1.3]
+
+  - name: push
+    applies_to:
+      - Drawer
+      - StorageFurniture_Drawer
+      - Dishwasher
+      - Window
+    direction: retract
+    start_from_open_fraction: [0.6, 1.0]
+    target_fraction: 0.0
+    motion_duration_range: [2.0, 4.0]
+    velocity_profile: smooth_minimum_jerk
+    randomize:
+      contact_jitter_m: 0.015
+      push_dir_jitter_deg: 8
+      speed_factor_range: [0.7, 1.3]
+
+  - name: rotate
+    applies_to:
+      - Faucet
+      - Scissors
+    direction: open
+    target_fraction_range: [0.5, 1.0]
+    motion_duration_range: [1.5, 3.0]
+    velocity_profile: smooth_minimum_jerk
+    randomize:
+      contact_jitter_m: 0.005
+      rotate_axis_jitter_deg: 5
+      speed_factor_range: [0.6, 1.4]
+
+  # ---------------------------------------------- soft tasks (route A: procedural)
+  - name: squeeze
+    applies_to:
+      - SoftToy
+    target_compression_range: [0.4, 0.7]
+    motion_duration_range: [1.5, 3.0]
+    velocity_profile: smooth_minimum_jerk
+    randomize:
+      speed_factor_range: [0.7, 1.3]
+
+  - name: fold
+    applies_to:
+      - Cloth
+    fold_angle_range: [120, 180]   # degrees
+    motion_duration_range: [2.0, 3.5]
+    velocity_profile: smooth_minimum_jerk
+    randomize:
+      speed_factor_range: [0.7, 1.3]
+
+  - name: pour
+    applies_to:
+      - Kettle
+    tilt_angle_range: [60, 90]     # degrees
+    motion_duration_range: [2.0, 3.5]
+    velocity_profile: smooth_minimum_jerk
+    randomize:
+      speed_factor_range: [0.6, 1.3]

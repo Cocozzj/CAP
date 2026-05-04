@@ -1,0 +1,32 @@
+# Core simulation & rendering
+# setuptools 81+ removed pkg_resources, but sapien still imports it. Pin <81.
+setuptools<81
+sapien>=2.2.0,<3.0    # PartNet-Mobility loader + multi-camera rendering
+numpy>=1.23
+scipy>=1.10           # for camera look-at quaternion math
+trimesh>=4.0          # for cheap bbox estimation in object_loader
+pyyaml>=6.0
+tqdm>=4.65
+pillow>=9.5
+opencv-python>=4.8
+imageio>=2.31
+imageio-ffmpeg>=0.4   # H.264 video writing/reading
+
+# Soft-body rendering (pyrender for procedural mesh objects in squeeze/fold tasks)
+# Note: pyrender pins PyOpenGL==3.1.0; do NOT explicitly request a different version.
+pyrender>=0.1.45
+
+# 3DGS reconstruction (Step 4)
+torch>=2.0
+gsplat>=1.0           # Gaussian Splatting rasterization (used by gsplat / hybrid backends)
+plyfile>=1.0
+
+# MVSplat backend (optional, only needed if gs.backend = mvsplat | hybrid)
+# Install MVSplat manually from https://github.com/donydchen/mvsplat
+# and provide src/mvsplat_adapter.py exposing load_model() and infer().
+
+# Optional: faster image / video IO
+av>=10.0              # PyAV, batched MP4 read/write
+
+# Dev
+pytest>=7.4

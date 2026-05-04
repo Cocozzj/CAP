@@ -1,0 +1,56 @@
+# Adaptive per-object camera planning rules.
+#
+# The renderer calls `camera_planner.plan_cameras_for_articulation` per object:
+#   1. computes world-space AABB of all links,
+#   2. finds the yaw direction with most joint motion (renders qmin / qmax for
+#      each candidate yaw, picks max pixel diff),
+#   3. produces 3 cameras at [best_yaw + offset, best_yaw + offset ± spread].
+#
+# To disable adaptive planning and use the static fallback list, set
+# `camera_design.enable: false`.
+
+camera_design:
+  enable: true
+
+  # ---- yaw (azimuth) ----
+  best_yaw_candidates: [0, 90, 180, 270]    # 4 directions to probe
+  best_yaw_motion_check: true               # if false, use yaw=0
+  yaw_spread_deg: 60                        # ± this around best_yaw for cam1/cam2
+  yaw_jitter_deg: [-20, 20]                 # global random offset shared by all 3 cams
+
+  # ---- pitch (camera elevation; positive = above target) ----
+  pitch_tall_object: 25                     # objects with height > threshold
+  pitch_short_object: 35                    # shorter objects (look down more)
+  height_threshold: 0.8                     # meters
+  pitch_jitter_deg: [-10, 10]
+
+  # ---- distance ----
+  distance_factor: 1.5                      # base = AABB_diagonal * factor
+  distance_jitter: [0.85, 1.15]
+
+  fovy_deg: 45
+
+# Static fallback (only used when camera_design.enable is false).
+# Names are unified to cam0 / cam1 / cam2 across both the adaptive
+# articulated path and the soft (pyrender) path so downstream code can
+# always read traj_dir/cam{0,1,2}.mp4 and cameras.json[cam{0,1,2}]
+# without branching on object_type.
+cameras:
+- name: cam0
+  azimuth_deg: 0
+  elevation_deg: 5
+  distance_factor: 2.5
+  fovy_deg: 45
+  target: moving_part_center
+- name: cam1
+  azimuth_deg: 50
+  elevation_deg: 5
+  distance_factor: 2.5
+  fovy_deg: 45
+  target: moving_part_center
+- name: cam2
+  azimuth_deg: -40
+  elevation_deg: 25
+  distance_factor: 2.5
+  fovy_deg: 45
+  target: moving_part_center

@@ -1,0 +1,121 @@
+# 15 PartNet-Mobility categories chosen for high motion saliency.
+#
+# Why these: each category has either a large hinge sweep (>= 60 deg) or a
+# large prismatic slide (>= 10 cm) with a moving part >= 5% of the object
+# bounding box. Categories with subtle motion (Bottle/cap, individual Buttons,
+# small Knobs) are intentionally excluded.
+#
+# `partnet_category_name`: name used by PartNet-Mobility's meta.json (lowercase)
+# `min_joint_range`: minimum joint range (rad for revolute, m for prismatic);
+#                    instances below this are filtered out
+# `joint_type`: revolute | prismatic | mixed; informational
+
+categories:
+  - name: Door
+    partnet_category_name: door
+    joint_type: revolute
+    min_joint_range: 1.0          # ~57 deg
+    notes: "Large angle sweep, large surface — best class."
+
+  - name: StorageFurniture_Door
+    partnet_category_name: storagefurniture
+    joint_type: revolute
+    min_joint_range: 1.0
+    notes: "Cabinet doors only — exclude pure-drawer instances at filter time."
+
+  - name: StorageFurniture_Drawer
+    partnet_category_name: storagefurniture
+    joint_type: prismatic
+    min_joint_range: 0.15         # 15 cm
+    notes: "Drawers from cabinets / dressers."
+
+  - name: Drawer
+    partnet_category_name: drawer
+    joint_type: prismatic
+    min_joint_range: 0.15
+    notes: "Standalone drawer instances."
+
+  - name: Refrigerator
+    partnet_category_name: refrigerator
+    joint_type: revolute
+    min_joint_range: 1.0
+    notes: "Fridge doors swing widely."
+
+  - name: Microwave
+    partnet_category_name: microwave
+    joint_type: revolute
+    min_joint_range: 1.4          # ~80 deg
+    notes: "Use ONLY the door joint, ignore button joints."
+    only_joint_index: 0           # use the largest-motion joint
+
+  - name: Oven
+    partnet_category_name: oven
+    joint_type: revolute
+    min_joint_range: 1.0
+    only_joint_index: 0
+
+  - name: Dishwasher
+    partnet_category_name: dishwasher
+    joint_type: mixed
+    min_joint_range: 0.8
+    notes: "Door (revolute) and rack (prismatic) both usable."
+
+  - name: Laptop
+    partnet_category_name: laptop
+    joint_type: revolute
+    min_joint_range: 1.5          # ~85 deg, screen hinge
+    notes: "Open/close lid."
+
+  - name: Suitcase
+    partnet_category_name: suitcase
+    joint_type: revolute
+    min_joint_range: 1.0
+    notes: "Lid open/close; some have prismatic handles too."
+
+  - name: Box
+    partnet_category_name: box
+    joint_type: revolute
+    min_joint_range: 1.0
+
+  - name: Window
+    partnet_category_name: window
+    joint_type: mixed
+    min_joint_range: 0.5
+    notes: "Casement = revolute, sash = prismatic."
+
+  - name: TrashCan
+    partnet_category_name: trashcan
+    joint_type: revolute
+    min_joint_range: 1.0
+    notes: "Lid hinge or pedal-driven flip."
+
+  - name: Faucet
+    partnet_category_name: faucet
+    joint_type: revolute
+    min_joint_range: 1.4          # ~80 deg, large handle only
+    notes: "Filter aggressively for instances with large handles."
+
+  - name: Scissors
+    partnet_category_name: scissors
+    joint_type: revolute
+    min_joint_range: 0.8          # ~45 deg open
+    notes: "Filter for instances with usable open angle."
+
+  # ---- soft / procedurally-generated categories (no PartNet asset) ----
+  - name: SoftToy
+    source: procedural
+    primitive_options: [soft_cube, soft_sphere]
+    n_instances: 10
+    notes: "Procedurally generated deformable cube/sphere; squeezed by SqueezeTask."
+
+  - name: Cloth
+    source: procedural
+    primitive_options: [cloth]
+    n_instances: 10
+    notes: "Procedurally generated planar mesh; folded by FoldTask."
+
+  - name: Kettle
+    partnet_category_name: kettle
+    joint_type: revolute
+    min_joint_range: 0.0          # we don't use the lid joint; we tilt root
+    notes: "Articulated PartNet kettle; PourTask drives the root pose, not joints."

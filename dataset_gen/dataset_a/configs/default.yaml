@@ -1,0 +1,59 @@
+scale:
+  n_categories: 15
+  instances_per_category: 20
+  trajectories_per_pair: 6
+  target_total_trajectories: 5000
+  soft_body_fraction: 0.1
+render:
+  resolution: 256
+  fps: 30
+  duration_seconds: 13.0
+  frames_per_trajectory: 390
+  n_cameras: 3
+  rgb_format: mp4
+  save_depth: false
+  save_part_segmentation: false
+saliency:
+  enable: true
+  min_geometry_score: 0.05
+  min_volume_ratio: 0.03
+  min_pixel_diff: 0.02
+  top_k_per_pair: 15
+physics:
+  engine: sapien
+  control: position
+  default_friction: 0.5
+  default_damping: 0.1
+  randomize_friction:
+  - 0.3
+  - 0.8
+  randomize_damping:
+  - 0.05
+  - 0.2
+  randomize_object_mass: null
+  step_dt: 0.0033
+  steps_per_frame: 10
+gs:
+  backend: mesh
+  refine_iters_after_mvsplat: 0
+  output_format: ply
+  fallback_recon_iters: 3000
+  fallback_init_n_points: 50000
+splits:
+  train_frac: 0.8
+  val_frac: 0.1
+  test_iid_frac: 0.1
+  ood_pair_fraction: 0.1
+  held_out_categories:
+  - Refrigerator
+  - Faucet
+  - Window
+packaging:
+  format: folders
+  shards_per_split: 40
+  compress_mp4_crf: 23
+runtime:
+  seed: 42
+  num_workers: 4
+  device: cuda
+  cache_dir: outputs/cache/

@@ -581,29 +581,34 @@ def reconstruction_loss(
                 # ranges differ by 10-100×, so plain L1 explodes and dominates
                 # ``rec_total``.  Normalise each sample by its own median before
                 # comparison — turns this into a scale-invariant L1.
-                # ``.detach()`` on the medians: we only want the raw values to
-                # carry gradient, not the per-sample scale (otherwise the loss
-                # has a degenerate fixed point where shrinking pred0 also
-                # shrinks its own normaliser).  Standard pattern for
-                # scale-invariant L1 (see MiDaS / DPT papers).
+                # Scale-and-shift invariant L1 (DPT-style, Ranftl 2021).
                 #
-                # ``min_scale`` floor: in the very first iterations the renderer
-                # may emit mostly-zero depth maps (background mask, init Gaussians
-                # behind camera, etc.).  Then ``pred0.median()`` is ~0 and the
-                # division explodes (we observed `loss/depth` peaking at 1337
-                # without this guard).  Floor to 0.1 — a reasonable lower bound
-                # on scene-scale depth in metres for the SSv2 setup
-                # (DepthAnything output range typically [0.5, 5] m after
-                # ``scene_scale_m=1.5`` rescaling in 03_estimate_depth.py).
-                eps       = 1e-6
-                min_scale = 0.1
-                p_med = pred0.detach().flatten(1).median(dim=1, keepdim=True).values \
-                              .view(pred0.shape[0], 1, 1, 1).abs().clamp_min(min_scale)
-                g_med = gt_depth.flatten(1).median(dim=1, keepdim=True).values \
-                              .view(gt_depth.shape[0], 1, 1, 1).abs().clamp_min(min_scale)
-                pred0_norm = pred0    / (p_med + eps)
-                gt_norm    = gt_depth / (g_med + eps)
-                out["depth"] = F.l1_loss(pred0_norm, gt_norm)
+                # Mini-run TB observation: pure median normalisation alone
+                # left ``loss/depth`` at ~75 because the gsplat camera-space
+                # depth and DepthAnything *relative* depth differ by both
+                # scale AND offset (and pred0 can even be negative for points
+                # behind the rendering frustum).  We need to also remove the
+                # per-sample shift before scaling.
+                #
+                # Approach: subtract the median (robust to outliers), then
+                # divide by the mean absolute deviation (a.k.a. MAD).  If
+                # pred = a*gt + b for any (a, b), this yields exactly equal
+                # post-normalisation tensors, so L1 → 0 — exactly the
+                # invariance we want against arbitrary scene-scale offsets.
+                #
+                # Both medians and the *pred-side* MAD are detached; we want
+                # the pred to learn structure relative to gt, not to game
+                # its own normaliser.
+                B = pred0.shape[0]
+                eps = 1e-3
+                p_med = pred0.detach().flatten(1).median(dim=1).values.view(B, 1, 1, 1)
+                g_med = gt_depth.flatten(1).median(dim=1).values.view(B, 1, 1, 1)
+                p_centered = pred0    - p_med
+                g_centered = gt_depth - g_med
+                p_scale = p_centered.detach().abs().mean(dim=(1, 2, 3), keepdim=True).clamp_min(eps)
+                g_scale = g_centered.abs().mean(dim=(1, 2, 3), keepdim=True).clamp_min(eps)
+                out["depth"] = F.l1_loss(p_centered / p_scale,
+                                         g_centered / g_scale)
         else:
             out["depth"] = pred_frames.new_zeros(())
     else:

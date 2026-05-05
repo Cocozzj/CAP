@@ -1,4 +1,4 @@
-from .model import CAPModel, TrainingStage
+from .model import CAPModel
 from .encoder import Encoder
 from .planner import Planner
 from .executor import Executor
@@ -10,6 +10,7 @@ from .utils import (
 )
 from .loss import (
     CAPLoss,
+    LossSpec,
     DEFAULT_LOSS_CFG,
     # Individual loss functions (for custom training loops)
     scene_distance,
@@ -33,7 +34,6 @@ from .loss import (
 __all__ = [
     # Core model
     "CAPModel",
-    "TrainingStage",
     "Encoder",
     "Planner",
     "Executor",
@@ -43,6 +43,7 @@ __all__ = [
     "build_scene_state",
     # Loss
     "CAPLoss",
+    "LossSpec",
     "DEFAULT_LOSS_CFG",
     "scene_distance",
     "closure_loss",

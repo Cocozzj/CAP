@@ -37,9 +37,10 @@ import torch
 
 from sklearn.manifold import TSNE
 
-from dataloader import ToyDataset, collate_batch
+from dataload import collate_batch
 
-from eval.utils import add_common_eval_args, load_model_for_eval, get_output_dir
+from ..utils import (add_common_eval_args, add_data_args, build_eval_loader,
+                     get_output_dir, load_model_for_eval)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -93,6 +94,7 @@ def _scatter_panel(
 def main():
     p = argparse.ArgumentParser()
     add_common_eval_args(p)
+    add_data_args(p, default_split="test_iid")
     p.add_argument("--tasks", nargs="+", required=True,
                    help="Texts to drive the planner; codes used per text are tallied")
     p.add_argument("--n-trials", type=int, default=16,
@@ -119,7 +121,8 @@ def main():
 
     # ── Tally code usage by (task, slot) over a small dataset sweep ──
     sh_dim = cfg["gs_param"]["gs_dimension"] - 11
-    ds = ToyDataset(n_samples=args.n_trials, sh_dim=sh_dim)
+    ds, _ = build_eval_loader(args, sh_dim, n_samples=args.n_trials)
+    n_trials_actual = min(args.n_trials, len(ds))
 
     # Need K (object slots) — pull from one trial.
     sample_batch = collate_batch([ds[0]])
@@ -136,7 +139,7 @@ def main():
 
     with torch.no_grad():
         for ti, txt in enumerate(args.tasks):
-            for trial in range(args.n_trials):
+            for trial in range(n_trials_actual):
                 batch     = collate_batch([ds[trial]])
                 gs_params = [g.to(device) for g in batch["gs_params"]]
                 # We just need a scene to size K — the codes themselves come

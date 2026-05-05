@@ -21,17 +21,18 @@ from pathlib import Path
 import torch
 
 from model import build_scene_state
-from dataloader import ToyDataset, collate_batch
 
 from .metrics import psnr, lpips_score, scene_distance_metric
-from .utils import add_common_eval_args, load_model_for_eval, get_output_dir
+from .utils import (add_common_eval_args, add_data_args, build_eval_loader,
+                    get_output_dir, load_model_for_eval)
 
 
 def main():
     parser = argparse.ArgumentParser()
     add_common_eval_args(parser)
+    add_data_args(parser, default_split="test_iid")
     parser.add_argument("--n-clips", type=int, default=8,
-                        help="Number of toy demo clips to process")
+                        help="Number of demo clips to process")
     args = parser.parse_args()
 
     model, cfg, device = load_model_for_eval(args)
@@ -40,8 +41,10 @@ def main():
     print(f"\n=== Mode B: imitation, {args.n_clips} clips ===")
 
     sh_dim = cfg["gs_param"]["gs_dimension"] - 11
-    ds = ToyDataset(n_samples=args.n_clips, sh_dim=sh_dim)
-    batch = collate_batch([ds[i] for i in range(args.n_clips)])
+    ds, loader = build_eval_loader(
+        args, sh_dim, n_samples=args.n_clips, batch_size=args.n_clips,
+    )
+    batch = next(iter(loader))
     frames    = batch["frames"].to(device)
     gs_params = [g.to(device) for g in batch["gs_params"]]
 

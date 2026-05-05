@@ -1,27 +1,30 @@
-
 # ================================================================
-# Loss weights & hyper-parameters  (aligned with train_plan.md §8)
+# Loss weights & hyper-parameters
 # ================================================================
 loss:
   # A. Algebraic structure
-  lambda_clos:            0.5
-  lambda_inv:             0.5
-  lambda_equiv:           0.3       # Stage-2 only (cross-object equivariance)
-  lambda_comm:            0.01      # base weight; ramped 0.01→0.1 in Stage-2
-  lambda_equiv_cross:     0.3       # cross-object equivariance (Prop 3)
+  lambda_clos:            0.5       # PDF
+  lambda_inv:             0.5       # PDF
+  lambda_eq:              0.5       # PDF (was 0.3 — equivariance is core contribution)
+  lambda_eq_cross:        0.5       # match lambda_eq (PDF unspecified)
+  lambda_comm:            0.01      # base; ramped 0.01→0.1 in Stage-2 (engineering)
+  lambda_comm_max:        0.1       # anneal endpoint for L_comm
   # B. Reconstruction
-  lambda_rec:             1.0       # outer weight for L_recon (plan §8)
+  lambda_rec:             0.2       # PDF (was 1.0 — was dominating)
   lambda_rec_mse:         0.2
-  lambda_rec_lpips:       0.1
+  lambda_rec_lpips:       0.1       # PDF (lambda_lpips = 0.1)
   lambda_depth:           0.5
   # C. Semantic alignment
-  lambda_nce:             0.3       # InfoNCE — all stages
+  lambda_nce:             0.1       # PDF (was 0.3)
   nce_temperature:        0.07
   # D. Quantization & planning
-  lambda_vq:              1.0
-  lambda_cvae_kl:         0.01      # KL base; annealed β: 0.01→1.0 in Stage-2
+  lambda_vq_act:          1.0       # standard VQ commitment (PDF unspecified)
+  lambda_vq_task:         1.0       # standard VQ commitment (PDF unspecified)
+  lambda_cvae_kl:         0.01      # base; β anneal 0.01→0.1 in Stage-2 (PDF: fixed β=0.1)
+  lambda_cvae_kl_max:     0.1       # anneal endpoint = PDF's β value
   lambda_cvae_recon:      1.0
-  lambda_hier:            0.2       # hierarchical consistency — Stage-2 only
+  lambda_planner_ce:      1.0       # AR cross-entropy
+  lambda_hier:            0.2       # hierarchical consistency (PDF unspecified)
   # E. Regularization
   lambda_lip:             0.1
   lip_target_C:           2.0
@@ -29,7 +32,7 @@ loss:
   lambda_entropy:         0.05      # codebook entropy — Stage-2 only
   entropy_H_min:          3.0
   entropy_H_max:          8.0
-  lambda_physics:         0.5       # physics total weight — Stage-1/2
+  lambda_physics:         0.1       # PDF (was 0.5)
   lambda_physics_vol:     0.5
   lambda_physics_contact: 1.0
   lambda_physics_energy:  1.0
@@ -40,36 +43,16 @@ loss:
 # Training: optimizer, scheduler, 3-stage curriculum
 # ================================================================
 training:
-  seed: 42
-  max_epochs: 100
-  # 3-stage curriculum: epoch boundaries
-  stage_schedule:
-    stage_1_end: 50           # epochs [ 0, 50): RIGID — Encoder + Executor rigid
-    stage_2_end: 70           # epochs [50, 70): PHYSICS — deform/physics warm-up
-                              # epochs [70,100): FULL — end-to-end fine-tune
-  optimizer:
-    type: adamw
-    lr: 1.0e-4            # Stage-0 base LR (per-stage LR set in train_ddp.py)
-    betas: [0.9, 0.999]
-    weight_decay: 1.0e-5
-  scheduler:
-    type: cosine
-    warmup_epochs: 5
-    min_lr: 1.0e-6
-  # Gumbel-softmax temperature annealing (slot attention)
+  # ONLY ``tau_schedule`` is consumed by trainer.py (see _compute_tau in train/trainer.py).
+  # All per-stage hyperparameters (lr, epochs, sample_prob ramp, render_n_timesteps,
+  # loss flags) live in train/stages.py.  Other process-level knobs (seed,
+  # max_epochs, optimizer.*, scheduler.*, grad_clip, save_every, output_dir)
+  # come from trainer.py CLI flags.  Don't add dead config keys here.
+
+  # Gumbel-softmax temperature annealing for slot attention.
+  # Linearly anneals tau from start → end over (anneal_epochs * steps_per_epoch)
+  # using the cumulative global_step (NOT per-stage step).
   tau_schedule:
     start: 1.0
     end: 0.1
     anneal_epochs: 30
-  # CVAE scheduled sampling probability
-  sample_prob_schedule:
-    start: 0.0
-    end: 0.5
-    ramp_epochs: 15
-    start_epoch: 70          # start at Stage-2 (Planner is frozen before this)
-  # Gradient clipping
-  grad_clip: 1.0
-  # Logging & checkpointing
-  log_interval: 10           # steps between log prints
-  save_interval: 5           # epochs between checkpoint saves
-  output_dir: "outputs/"

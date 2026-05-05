@@ -23,9 +23,9 @@ from pathlib import Path
 import torch
 
 from model import codebook_utilisation, build_scene_state
-from dataloader import ToyDataset, collate_batch
 
-from .utils import add_common_eval_args, load_model_for_eval, get_output_dir
+from .utils import (add_common_eval_args, add_data_args, build_eval_loader,
+                    get_output_dir, load_model_for_eval)
 from .render_hook import render_scene, available_backend
 from .metrics import psnr, lpips_score
 
@@ -33,11 +33,12 @@ from .metrics import psnr, lpips_score
 def main():
     parser = argparse.ArgumentParser()
     add_common_eval_args(parser)
+    add_data_args(parser, default_split="test_iid")
     parser.add_argument("--texts",       nargs="+", required=True,
                         help="One or more text prompts")
     parser.add_argument("--num-samples", type=int, default=1)
     parser.add_argument("--n-scenes",    type=int, default=4,
-                        help="Number of toy scenes to sample for execution")
+                        help="Number of scenes to sample for execution")
     parser.add_argument("--render", action="store_true",
                         help="Try rendering final SceneState via gsplat/nerfacc + "
                              "compute PSNR/LPIPS vs GT frames (skipped if no renderer)")
@@ -61,10 +62,12 @@ def main():
     )
     print(f"  codebook utilisation: {util}")
 
-    # 3) Execute on a toy scene + read out trajectory length
+    # 3) Execute on a real scene + read out trajectory length
     sh_dim = cfg["gs_param"]["gs_dimension"] - 11
-    ds = ToyDataset(n_samples=args.n_scenes, sh_dim=sh_dim)
-    batch = collate_batch([ds[i] for i in range(args.n_scenes)])
+    ds, loader = build_eval_loader(
+        args, sh_dim, n_samples=args.n_scenes, batch_size=args.n_scenes,
+    )
+    batch = next(iter(loader))
     gs_params = [g.to(device) for g in batch["gs_params"]]
 
     # Build a SceneState with the encoder's phi

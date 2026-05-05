@@ -25,9 +25,8 @@ import torch
 
 from model import build_scene_state
 from model.loss import closure_loss, inverse_loss, commutator_loss
-from dataloader import ToyDataset, collate_batch
-
-from .utils import add_common_eval_args, load_model_for_eval, get_output_dir
+from .utils import (add_common_eval_args, add_data_args, build_eval_loader,
+                    get_output_dir, load_model_for_eval)
 
 
 def _aggregate(values: List[float]) -> dict:
@@ -44,6 +43,7 @@ def _aggregate(values: List[float]) -> dict:
 def main():
     parser = argparse.ArgumentParser()
     add_common_eval_args(parser)
+    add_data_args(parser, default_split="test_iid")    # paper Table 1 default
     parser.add_argument("--n-batches",  type=int, default=16,
                         help="Number of held-out batches to aggregate over")
     parser.add_argument("--batch-size", type=int, default=4)
@@ -58,14 +58,19 @@ def main():
     print(f"  enable_physics = {args.enable_physics}")
 
     sh_dim = cfg["gs_param"]["gs_dimension"] - 11
-    dataset = ToyDataset(n_samples=args.n_batches * args.batch_size, sh_dim=sh_dim)
+    dataset, loader = build_eval_loader(
+        args, sh_dim,
+        n_samples=args.n_batches * args.batch_size,
+        batch_size=args.batch_size,
+    )
+    n_batches_actual = min(args.n_batches, len(loader))
 
     clos_vals, inv_vals, comm_vals = [], [], []
 
     with torch.no_grad():
-        for b in range(args.n_batches):
-            indices = list(range(b * args.batch_size, (b + 1) * args.batch_size))
-            batch = collate_batch([dataset[i] for i in indices])
+        for b, batch in enumerate(loader):
+            if b >= n_batches_actual:
+                break
             frames    = batch["frames"].to(device)
             gs_params = [g.to(device) for g in batch["gs_params"]]
 
@@ -86,7 +91,7 @@ def main():
             inv_vals.append(float(inv.item()))
             comm_vals.append(float(comm.item()))
 
-            print(f"  batch {b + 1:>3d}/{args.n_batches}: "
+            print(f"  batch {b + 1:>3d}/{n_batches_actual}: "
                   f"clos={clos_vals[-1]:.4f}  inv={inv_vals[-1]:.4f}  "
                   f"comm={comm_vals[-1]:.4f}")
 

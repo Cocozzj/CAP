@@ -47,9 +47,8 @@ import torch
 
 from model import build_scene_state
 from model.loss import closure_loss, inverse_loss, commutator_loss
-from dataloader import ToyDataset, collate_batch
 
-from .utils import load_model_for_eval
+from .utils import add_data_args, build_eval_loader, load_model_for_eval
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -63,6 +62,7 @@ def _gaps_for_ckpt(
     n_batches: int = 16,
     batch_size: int = 4,
     enable_physics: bool = False,
+    data_args: SimpleNamespace = None,
 ) -> Tuple[int, Dict[str, float]]:
     """Load a checkpoint and compute mean closure/inverse/commutator gaps.
 
@@ -73,18 +73,28 @@ def _gaps_for_ckpt(
         config = str(config_path) if config_path else None,
         device = device,
         output_dir = None,
+        # Data args required by build_eval_loader
+        manifest   = data_args.manifest,
+        data_dir   = data_args.data_dir,
+        split      = data_args.split,
+        T          = data_args.T,
+        image_size = data_args.image_size,
     )
     model, cfg, dev = load_model_for_eval(args)
     K = int(cfg["encoder"]["action_tokenizer"]["num_action_codebook"])
 
     sh_dim = cfg["gs_param"]["gs_dimension"] - 11
-    ds = ToyDataset(n_samples=n_batches * batch_size, sh_dim=sh_dim)
+    ds, loader = build_eval_loader(
+        args, sh_dim,
+        n_samples=n_batches * batch_size, batch_size=batch_size,
+    )
+    n_batches_actual = min(n_batches, len(loader))
 
     clos, inv, comm = [], [], []
     with torch.no_grad():
-        for b in range(n_batches):
-            indices = list(range(b * batch_size, (b + 1) * batch_size))
-            batch = collate_batch([ds[i] for i in indices])
+        for b, batch in enumerate(loader):
+            if b >= n_batches_actual:
+                break
             frames    = batch["frames"].to(dev)
             gs_params = [g.to(dev) for g in batch["gs_params"]]
 
@@ -172,6 +182,7 @@ def main():
     p.add_argument("--batch-size", type=int, default=4)
     p.add_argument("--enable-physics", action="store_true")
     p.add_argument("--output-dir", type=str, default="runs/k_scaling_sweep")
+    add_data_args(p, default_split="test_iid")
     args = p.parse_args()
 
     out_dir = Path(args.output_dir)
@@ -190,6 +201,7 @@ def main():
             Path(ck), config_path=cfg_path, device=args.device,
             n_batches=args.n_batches, batch_size=args.batch_size,
             enable_physics=args.enable_physics,
+            data_args=args,
         )
         if K in per_K:
             print(f"    WARN: duplicate K={K}; overwriting earlier result")

@@ -1,9 +1,9 @@
 gs_param:
-  sh_degree: 3
+  # Only ``gs_dimension`` is consumed by CAPModel — sh_degree / max_points /
+  # init_sigma / init_opacity were never read; they previously lived here as
+  # documentation but caused config drift.  Removed so the only key visible
+  # is the one that actually affects the model.
   gs_dimension: 59        # mu[3] + scale[3] + cov[4] + opacity[1] + sh[(3+1)^2*3=48] = 59
-  max_points: 20000       # budget Ng per frame for GS initialisation
-  init_sigma: 0.01        # isotropic scale init (actual scale, not log)
-  init_opacity: 0.5       # opacity init for each Gaussian
 
 # ================================================================
 # Encoder (perception → motion → discrete tokens)
@@ -139,7 +139,9 @@ executor:
     hidden_scalar: 16           # TFN scalar channel width  → tfn_scalar_dim
     hidden_vector: 4            # TFN vector channel width  → tfn_vector_dim
   physics:
-    enabled: false
+    # NOTE: ``enabled: true/false`` is NOT read here — physics on/off is gated
+    # entirely per-stage by ``StageSpec.enable_physics`` in train/stages.py.
+    # Only the sub-keys below (pbd, rigid_contact, enabled_backends) reach the model.
     # Ablation (PDF main proposal §5.2): subset of backends to instantiate.
     # Default = all 3.  Examples:
     #   enabled_backends: [pbd]               # PBD-only

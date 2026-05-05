@@ -24,9 +24,9 @@ import torch
 
 from model import build_scene_state, SceneState
 from model.utils import masked_mean
-from dataloader import ToyDataset, collate_batch
 
-from .utils import add_common_eval_args, load_model_for_eval, get_output_dir
+from .utils import (add_common_eval_args, add_data_args, build_eval_loader,
+                    get_output_dir, load_model_for_eval)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -113,6 +113,7 @@ def energy_stability(trajectory: List[SceneState],
 def main():
     parser = argparse.ArgumentParser()
     add_common_eval_args(parser)
+    add_data_args(parser, default_split="test_iid")
     parser.add_argument("--n-batches",  type=int, default=8)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--ground-z",   type=float, default=0.0,
@@ -125,14 +126,19 @@ def main():
     print(f"\n=== Physics metrics: {args.n_batches} batches × {args.batch_size} samples ===")
 
     sh_dim = cfg["gs_param"]["gs_dimension"] - 11
-    dataset = ToyDataset(n_samples=args.n_batches * args.batch_size, sh_dim=sh_dim)
+    dataset, loader = build_eval_loader(
+        args, sh_dim,
+        n_samples=args.n_batches * args.batch_size,
+        batch_size=args.batch_size,
+    )
+    n_batches_actual = min(args.n_batches, len(loader))
 
     vols, recs, pens, ens = [], [], [], []
 
     with torch.no_grad():
-        for b in range(args.n_batches):
-            indices = list(range(b * args.batch_size, (b + 1) * args.batch_size))
-            batch = collate_batch([dataset[i] for i in indices])
+        for b, batch in enumerate(loader):
+            if b >= n_batches_actual:
+                break
             frames    = batch["frames"].to(device)
             gs_params = [g.to(device) for g in batch["gs_params"]]
 
@@ -151,7 +157,7 @@ def main():
             pens.append(penetration_penalty(exec_out["final_state"], args.ground_z))
             ens.append(energy_stability(exec_out["trajectory"]))
 
-            print(f"  batch {b + 1:>3d}/{args.n_batches}: "
+            print(f"  batch {b + 1:>3d}/{n_batches_actual}: "
                   f"vol={vols[-1]:.4f}  recov={recs[-1]:.4f}  "
                   f"penet={pens[-1]:.4f}  energy={ens[-1]:.4f}")
 

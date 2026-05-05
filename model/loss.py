@@ -4,39 +4,20 @@ loss.py — CAP Loss Suite (PDF f07d2c0a + fdfa011c).
 Loss families
 ─────────────
 A. Algebraic Structure (5):  L_clos, L_inv, L_eq, L_eq_cross, L_comm
-B. Reconstruction (1):       L_rec      (Stage-0 / Stage-2)
+B. Reconstruction (1):       L_rec
 C. Semantic Alignment (1):   L_NCE      (text ↔ task embedding)
 D. Quantisation & Plan (4):  L_VQ_act, L_VQ_task, L_CVAE, L_hier
 E. Regularisation (3):       L_Lip, L_entropy, L_phys
 
-Stage activation
-────────────────
-  Stage-0  RIGID:   B(rec)+A(clos+inv+comm@0.01)+C(nce)+D(VQ)
-  Stage-1  PHYSICS: above + E(phys+Lip)              [enc+planner frozen]
-  Stage-2  FULL:    everything (eq@0.3, comm 0.01→0.1 ramp, KL β anneal)
+Always-on terms (compute regardless of spec):
+    L_clos, L_inv, L_comm, L_rec (if GT given), L_NCE, L_VQ_act, L_VQ_task, planner_total (CVAE recon + CE).
 
-Public API
-──────────
-    loss_fn = CAPLoss(cfg=...)
-    losses  = loss_fn(model=model,
-                      training_out=training_out,        # from CAPModel.forward
-                      gt=gt_dict,                        # {"frames": ..., "depth": ..., "text": [...]}
-                      stage=TrainingStage.RIGID)
-    losses["total"].backward()
-
-The ``training_out`` dict comes from ``CAPModel.training_forward`` and contains:
-    encoder       — full Encoder forward output (incl. seq_tokens, physical_params,
-                    sub_quantized, vq_loss, recon, phi, assignment, ...)
-    planner       — full Planner forward output (logits, targets, mu/logvar,
-                    vq_loss, h_task, recon_h_task, task_emb, v_proj)
-    executor      — Executor.apply_sequence output (final SceneState + trajectory + aux_list)
-    scene_state   — initial SceneState (before Executor)
-    token_indices — [B, L] flat AR target tokens
 """
 
 from __future__ import annotations
 
 import warnings
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
@@ -47,36 +28,69 @@ from .utils import SceneState, masked_mean
 
 
 # ══════════════════════════════════════════════════════════════════════
+# LossSpec — caller-controlled curriculum
+# ══════════════════════════════════════════════════════════════════════
+
+@dataclass
+class LossSpec:
+    """
+
+    Physics-conditional (need physics rollouts):
+        enable_physics:      pass enable_physics=True to clos/inv/comm
+        enable_lipschitz:    add L_Lip
+        enable_physics_loss: add L_phys (volume / contact / energy)
+
+    Full-stage terms:
+        enable_equiv:        add L_eq + L_eq_cross
+        enable_hier:         add L_hier (text→task→atomic distillation)
+        enable_entropy:      add L_entropy (codebook usage)
+
+    Annealing schedules (over training step):
+        anneal_cvae_kl:      ramp KL β from cfg.lambda_cvae_kl → ..._max
+        anneal_comm:         ramp L_comm weight from cfg.lambda_comm → ..._max
+    """
+    enable_physics:      bool = False
+    enable_lipschitz:    bool = False
+    enable_physics_loss: bool = False
+    enable_equiv:        bool = False
+    enable_hier:         bool = False
+    enable_entropy:      bool = False
+    anneal_cvae_kl:      bool = False
+    anneal_comm:         bool = False
+
+
+# ══════════════════════════════════════════════════════════════════════
 # Default hyper-parameters (overridden by cfg/loss.yaml)
 # ══════════════════════════════════════════════════════════════════════
 
 DEFAULT_LOSS_CFG: Dict[str, Any] = {
+    # ── Values aligned with PDF §模型训练配置 (page 13) ───────────────
     # A. Algebraic structure
-    "lambda_clos":          0.5,
-    "lambda_inv":           0.5,
-    "lambda_eq":            0.3,
-    "lambda_eq_cross":      0.3,
+    "lambda_clos":          0.5,         # PDF
+    "lambda_inv":           0.5,         # PDF
+    "lambda_eq":            0.5,         # PDF
+    "lambda_eq_cross":      0.5,         # match lambda_eq
     "lambda_comm":          0.01,        # base; ramped 0.01 → 0.1 in Stage-2
     "lambda_comm_max":      0.1,
 
     # B. Reconstruction
-    "lambda_rec":           1.0,
+    "lambda_rec":           0.2,         # PDF
     "lambda_rec_mse":       0.2,
-    "lambda_rec_lpips":     0.1,
+    "lambda_rec_lpips":     0.1,         # PDF (lambda_lpips)
     "lambda_depth":         0.5,
 
     # C. Semantic alignment
-    "lambda_nce":           0.3,
+    "lambda_nce":           0.1,         # PDF
     "nce_temperature":      0.07,
 
     # D. Quantisation + planner
-    "lambda_vq_act":        1.0,         # Encoder VQ commitment
-    "lambda_vq_task":       1.0,         # Planner TaskTokenizer VQ commitment
-    "lambda_cvae_kl":       0.01,        # base; β anneal 0.01 → 1.0 in Stage-2
-    "lambda_cvae_kl_max":   1.0,
+    "lambda_vq_act":        1.0,         # standard VQ commitment
+    "lambda_vq_task":       1.0,         # standard VQ commitment
+    "lambda_cvae_kl":       0.01,        # base; β anneal 0.01 → 0.1 (PDF endpoint)
+    "lambda_cvae_kl_max":   0.1,         # PDF: β=0.1 fixed; we land here at end of Stage-2
     "lambda_cvae_recon":    1.0,
     "lambda_planner_ce":    1.0,         # AR cross-entropy
-    "lambda_hier":          0.2,         # hierarchical consistency, Stage-2
+    "lambda_hier":          0.2,
 
     # E. Regularisation
     "lambda_lip":           0.1,
@@ -85,7 +99,7 @@ DEFAULT_LOSS_CFG: Dict[str, Any] = {
     "lambda_entropy":       0.05,
     "entropy_H_min":        3.0,
     "entropy_H_max":        8.0,
-    "lambda_physics":       0.5,
+    "lambda_physics":       0.1,         # PDF
     "lambda_physics_vol":   0.5,
     "lambda_physics_contact": 1.0,
     "lambda_physics_energy":  1.0,
@@ -398,29 +412,58 @@ def commutator_loss(
 # ══════════════════════════════════════════════════════════════════════
 
 def reconstruction_loss(
-    pred_frames: Optional[torch.Tensor],         # [B, V, T, 3, H, W] or None
-    gt_frames:   Optional[torch.Tensor],
-    pred_depth:  Optional[torch.Tensor] = None,
-    gt_depth:    Optional[torch.Tensor] = None,
-    cfg: Optional[Dict[str, Any]] = None,
+    pred_frames:        Optional[torch.Tensor],   # [B, V, T_pred, 3, H, W] or None
+    gt_frames:          Optional[torch.Tensor],   # [B, V, T_gt,   3, H, W]
+    pred_depth:         Optional[torch.Tensor] = None,
+    gt_depth:           Optional[torch.Tensor] = None,
+    cfg:                Optional[Dict[str, Any]] = None,
+    rendered_timesteps: Optional[List[int]] = None,   # which T_gt indices pred covers
+    T_total:            Optional[int] = None,         # len(trajectory) — for index mapping
 ) -> Dict[str, torch.Tensor]:
     """L_rec = MSE + LPIPS + depth (PDF §5.1).
 
+    Renderer typically renders a SPARSE subset of timesteps (e.g. [initial,
+    final]) to keep training cost manageable.  ``rendered_timesteps`` lists
+    those indices in [0, T_total]; we subsample ``gt_frames`` to match before
+    computing pixel losses.
+
     LPIPS is optional (requires lpips package).  Depth term only fires
-    when both pred_depth and gt_depth are provided (Dataset-B with MiDaS).
+    when both pred_depth and gt_depth are provided.
     """
     cfg = cfg or DEFAULT_LOSS_CFG
     out = {}
 
     if pred_frames is None or gt_frames is None:
-        # No rendered frames yet (training stage / loss disabled)
-        zero = (pred_frames if pred_frames is not None else gt_frames
-                if gt_frames is not None else torch.zeros(1)).new_zeros(())
-        out["mse"]   = zero
-        out["lpips"] = zero
-        out["depth"] = zero
+        # No rendered frames yet (gsplat missing / cameras not passed / loss disabled)
+        anchor = pred_frames if pred_frames is not None else gt_frames
+        zero = anchor.new_zeros(()) if anchor is not None else torch.zeros(())
+        out["mse"]       = zero
+        out["lpips"]     = zero
+        out["depth"]     = zero
         out["rec_total"] = zero
         return out
+
+    # ── Align pred (T_pred) and gt (T_gt) along the time axis ──
+    # pred_frames: [B, V, T_pred, 3, H, W]   gt_frames: [B, V, T_gt, 3, H, W]
+    T_pred = pred_frames.shape[2]
+    T_gt   = gt_frames.shape[2]
+    if T_pred != T_gt:
+        if rendered_timesteps is not None and T_total is not None and T_total > 0:
+            # Map render-side index (0..T_total) → gt-frame index (0..T_gt-1)
+            scale = (T_gt - 1) / max(T_total, 1)
+            gt_idx = [min(int(round(t * scale)), T_gt - 1) for t in rendered_timesteps]
+        else:
+            # Fallback: take first/last/uniform stride
+            if T_pred == 1:
+                gt_idx = [T_gt - 1]
+            elif T_pred == 2:
+                gt_idx = [0, T_gt - 1]
+            else:
+                stride = max(T_gt // T_pred, 1)
+                gt_idx = list(range(0, T_gt, stride))[:T_pred]
+        gt_frames = gt_frames[:, :, gt_idx]
+        if pred_depth is not None and gt_depth is not None and gt_depth.dim() >= 3:
+            gt_depth = gt_depth[:, :, gt_idx]
 
     out["mse"] = F.mse_loss(pred_frames, gt_frames)
 
@@ -436,9 +479,24 @@ def reconstruction_loss(
     except Exception:
         out["lpips"] = pred_frames.new_zeros(())
 
-    # Depth (single-view supervision)
+    # Depth supervision.
+    # Two GT shapes are supported:
+    #   per-frame: [B, V, T_gt, 1, H, W]      (subsample to render timesteps, full match)
+    #   static:    [B, V, H, W]               (DatasetB MiDaS — single map for the
+    #                                          INITIAL frame only).  In this case
+    #                                          we only score pred_depth's first
+    #                                          rendered timestep against it.
     if pred_depth is not None and gt_depth is not None:
-        out["depth"] = F.l1_loss(pred_depth, gt_depth)
+        if gt_depth.dim() == 6:
+            # Already aligned at frame level — gt_depth was sub-sampled with frames
+            out["depth"] = F.l1_loss(pred_depth, gt_depth)
+        elif gt_depth.dim() == 4:
+            # Static initial-frame depth (DatasetB).  Compare to pred_depth[:, :, 0]
+            # only if the renderer included the initial timestep.
+            pred0 = pred_depth[:, :, 0, 0]                     # [B, V, H, W]
+            out["depth"] = F.l1_loss(pred0, gt_depth)
+        else:
+            out["depth"] = pred_frames.new_zeros(())
     else:
         out["depth"] = pred_frames.new_zeros(())
 
@@ -556,10 +614,13 @@ def lipschitz_loss(
     eps: float = 0.01,
     target_C: float = 2.0,
     enable_physics: bool = True,
+    task_context: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Bound executor Jacobian: ‖E(g+δ) − E(g)‖ / ‖δ‖ ≤ C  (PDF §1.4).
 
     Implemented as a hinge: penalise (||ΔS|| / ||δ|| − C)_+².
+    Threads ``task_context`` through to keep the perturbation comparison
+    under the same conditioning as the rest of the loss suite.
     """
     T = next(v.shape[1] for v in physical_params_seq.values() if v is not None)
     t = int(torch.randint(0, T, (1,)).item())
@@ -570,8 +631,8 @@ def lipschitz_loss(
     perturb = eps * torch.randn_like(g["micro_rotation"])
     g_pert["micro_rotation"] = g["micro_rotation"] + perturb
 
-    s_orig = _apply_token_safe(executor, scene, g,      enable_physics)
-    s_pert = _apply_token_safe(executor, scene, g_pert, enable_physics)
+    s_orig = _apply_token_safe(executor, scene, g,      enable_physics, task_context)
+    s_pert = _apply_token_safe(executor, scene, g_pert, enable_physics, task_context)
 
     delta = (s_pert.mu - s_orig.mu).flatten(1).norm(dim=-1)        # [B]
     perturb_norm = perturb.flatten(1).norm(dim=-1).clamp(min=1e-8)  # [B]
@@ -612,10 +673,19 @@ def physics_loss(
     Returns dict with components and total.
     """
     cfg = cfg or DEFAULT_LOSS_CFG
+
+    # Find device from any aux tensor so zero placeholders go to the right device
+    def _zero():
+        for aux in executor_aux:
+            for v in aux.values():
+                if isinstance(v, torch.Tensor):
+                    return v.new_zeros(())
+        return torch.zeros(())              # only when aux is fully empty (eval-only)
+
     if not executor_aux:
-        zero = torch.zeros(())
-        return {"physics_vol": zero, "physics_contact": zero,
-                "physics_energy": zero, "physics_total": zero}
+        z = _zero()
+        return {"physics_vol": z, "physics_contact": z,
+                "physics_energy": z, "physics_total": z}
 
     # Volume: penalise large vfield divergence (approximation)
     vol_terms = []
@@ -623,7 +693,7 @@ def physics_loss(
         vfd = aux.get("vfield_delta")
         if vfd is not None:
             vol_terms.append(vfd.flatten(1).norm(dim=-1).pow(2).mean())
-    vol = torch.stack(vol_terms).mean() if vol_terms else torch.zeros(())
+    vol = torch.stack(vol_terms).mean() if vol_terms else _zero()
 
     # Contact: penalise t_used penetrating below ground (z < d_min)
     d_min = cfg["physics_contact_d_min"]
@@ -632,7 +702,7 @@ def physics_loss(
         t_used = aux.get("t_used_world")
         if t_used is not None:
             contact_terms.append(F.relu(d_min - t_used[..., 2]).pow(2).mean())
-    contact = torch.stack(contact_terms).mean() if contact_terms else torch.zeros(())
+    contact = torch.stack(contact_terms).mean() if contact_terms else _zero()
 
     # Energy: kinetic energy proxy from frame-to-frame translation magnitude
     energy_terms = []
@@ -640,7 +710,7 @@ def physics_loss(
         t_used = aux.get("t_used_world")
         if t_used is not None:
             energy_terms.append(t_used.flatten(1).norm(dim=-1).pow(2).mean())
-    energy = torch.stack(energy_terms).mean() if energy_terms else torch.zeros(())
+    energy = torch.stack(energy_terms).mean() if energy_terms else _zero()
 
     total = (cfg["lambda_physics_vol"]     * vol
              + cfg["lambda_physics_contact"] * contact
@@ -660,7 +730,7 @@ class CAPLoss(nn.Module):
 
         loss_fn = CAPLoss(cfg=cfg.get("loss", {}))
         losses  = loss_fn(model=model, training_out=training_out,
-                          gt=gt_dict, stage=TrainingStage.RIGID,
+                          gt=gt_dict, spec=LossSpec(),
                           step=0, total_steps=10000)
         losses["total"].backward()
     """
@@ -682,17 +752,13 @@ class CAPLoss(nn.Module):
         model,                                       # CAPModel
         training_out: Dict[str, Any],
         gt: Optional[Dict[str, Any]] = None,         # {"frames", "depth", "text"}
-        stage: int = 0,
+        spec: Optional[LossSpec] = None,             # which terms to compute / anneal
         step: int = 0,
         total_steps: int = 1,
     ) -> Dict[str, torch.Tensor]:
-        cfg = self.cfg
+        cfg  = self.cfg
+        spec = spec or LossSpec()                    # default: everything OFF
         out: Dict[str, torch.Tensor] = {}
-
-        # Stage flag (TrainingStage constants: 0=RIGID, 1=PHYSICS, 2=FULL)
-        is_rigid   = (stage == 0)
-        is_physics = (stage == 1)
-        is_full    = (stage == 2)
 
         enc_out  = training_out["encoder"]
         plan_out = training_out["planner"]
@@ -701,95 +767,100 @@ class CAPLoss(nn.Module):
         ppseq    = enc_out["physical_params"]
         seq_tok  = enc_out["seq_tokens"]
         K_codes  = model.encoder.action_enc.vq.num_codes
+        zero     = scene.mu.new_zeros(())
 
         # Task context for executor's deform branch
         task_emb = plan_out.get("task_emb")
         v_proj   = plan_out.get("v_proj")
         task_ctx = (model._expand_task_context(task_emb, scene.K)
                     if task_emb is not None else None)
-        physics_on = (is_physics or is_full)
+        phys_on  = spec.enable_physics
 
         # ── A. Algebraic structure ──────────────────────────────────
         out["L_clos"] = closure_loss(model.executor, scene, ppseq,
-                                     enable_physics=physics_on, task_context=task_ctx)
+                                     enable_physics=phys_on, task_context=task_ctx)
         out["L_inv"]  = inverse_loss(model.executor, scene, ppseq,
-                                     enable_physics=physics_on, task_context=task_ctx)
-
-        if is_full:
-            out["L_eq"]       = equivariance_loss(model.executor, scene, ppseq,
-                                                  enable_physics=physics_on, task_context=task_ctx)
-            out["L_eq_cross"] = equivariance_cross_object_loss(model.executor, scene, ppseq,
-                                                               enable_physics=physics_on, task_context=task_ctx)
-        else:
-            zero = scene.mu.new_zeros(())
-            out["L_eq"], out["L_eq_cross"] = zero, zero
-
+                                     enable_physics=phys_on, task_context=task_ctx)
         out["L_comm"] = commutator_loss(model.executor, scene, ppseq,
-                                        enable_physics=physics_on, task_context=task_ctx)
+                                        enable_physics=phys_on, task_context=task_ctx)
+
+        if spec.enable_equiv:
+            out["L_eq"]       = equivariance_loss(model.executor, scene, ppseq,
+                                                  enable_physics=phys_on, task_context=task_ctx)
+            out["L_eq_cross"] = equivariance_cross_object_loss(model.executor, scene, ppseq,
+                                                               enable_physics=phys_on, task_context=task_ctx)
+        else:
+            out["L_eq"], out["L_eq_cross"] = zero, zero
 
         # ── B. Reconstruction (if GT frames provided) ───────────────
         if gt is not None and gt.get("frames") is not None:
-            rec = reconstruction_loss(
-                pred_frames=exec_out.get("rendered_frames"),
-                gt_frames=gt.get("frames"),
-                pred_depth=exec_out.get("rendered_depth"),
-                gt_depth=gt.get("depth"),
-                cfg=cfg,
-            )
-            out.update(rec)
+            out.update(reconstruction_loss(
+                pred_frames        = exec_out.get("rendered_frames"),
+                gt_frames          = gt.get("frames"),
+                pred_depth         = exec_out.get("rendered_depth"),
+                gt_depth           = gt.get("depth"),
+                cfg                = cfg,
+                rendered_timesteps = exec_out.get("rendered_timesteps"),
+                T_total            = exec_out.get("rendered_T_total"),
+            ))
         else:
-            zero = scene.mu.new_zeros(())
             out["mse"], out["lpips"], out["depth"], out["rec_total"] = zero, zero, zero, zero
 
         # ── C. InfoNCE ──────────────────────────────────────────────
-        out["L_NCE"] = infonce_loss(task_emb, v_proj, cfg["nce_temperature"]) \
-                       if task_emb is not None else scene.mu.new_zeros(())
+        out["L_NCE"] = (infonce_loss(task_emb, v_proj, cfg["nce_temperature"])
+                        if task_emb is not None else zero)
 
         # ── D. Quantisation + planner ───────────────────────────────
-        out["L_VQ_act"] = enc_out.get("vq_loss", scene.mu.new_zeros(()))
-        beta_kl = self._anneal(cfg["lambda_cvae_kl"], cfg["lambda_cvae_kl_max"],
-                               step, total_steps) if is_full else cfg["lambda_cvae_kl"]
-        cvae_d  = cvae_loss(plan_out, pad_id=model._pad_id,
-                            kl_weight=beta_kl,
-                            recon_weight=cfg["lambda_cvae_recon"],
-                            ce_weight=cfg["lambda_planner_ce"])
-        out.update(cvae_d)
-        out["L_VQ_task"] = plan_out.get("vq_loss", scene.mu.new_zeros(()))
+        out["L_VQ_act"]  = enc_out.get("vq_loss", zero)
+        out["L_VQ_task"] = plan_out.get("vq_loss") if plan_out.get("vq_loss") is not None else zero
 
-        if is_full:
+        # Skip CVAE losses entirely if Planner forward was skipped
+        # (caller passed run_planner=False → plan_out has no logits/targets/mu/...)
+        if plan_out and "logits" in plan_out:
+            beta_kl = (self._anneal(cfg["lambda_cvae_kl"], cfg["lambda_cvae_kl_max"], step, total_steps)
+                       if spec.anneal_cvae_kl else cfg["lambda_cvae_kl"])
+            out.update(cvae_loss(plan_out, pad_id=model._pad_id,
+                                 kl_weight=beta_kl,
+                                 recon_weight=cfg["lambda_cvae_recon"],
+                                 ce_weight=cfg["lambda_planner_ce"]))
+        else:
+            out["planner_ce"]    = zero
+            out["planner_kl"]    = zero
+            out["planner_recon"] = zero
+            out["planner_total"] = zero
+
+        if spec.enable_hier:
             out["L_hier"] = hierarchical_loss(
                 model.planner, model.encoder,
                 text_embed=v_proj, task_emb=task_emb,
                 sampling_cfg=model.planner.sampling_cfg,
             )
         else:
-            out["L_hier"] = scene.mu.new_zeros(())
+            out["L_hier"] = zero
 
         # ── E. Regularisation ──────────────────────────────────────
-        if physics_on:
+        if spec.enable_lipschitz:
             out["L_Lip"] = lipschitz_loss(model.executor, scene, ppseq,
                                           eps=cfg["lip_epsilon"], target_C=cfg["lip_target_C"],
-                                          enable_physics=True)
+                                          enable_physics=phys_on, task_context=task_ctx)
         else:
-            out["L_Lip"] = scene.mu.new_zeros(())
+            out["L_Lip"] = zero
 
-        if is_full:
+        if spec.enable_entropy:
             out["L_entropy"] = entropy_loss(seq_tok, K_codes,
                                             cfg["entropy_H_min"], cfg["entropy_H_max"])
         else:
-            out["L_entropy"] = scene.mu.new_zeros(())
+            out["L_entropy"] = zero
 
-        if physics_on:
-            phys = physics_loss(exec_out.get("aux_list", []), cfg=cfg)
-            out.update(phys)
+        if spec.enable_physics_loss:
+            out.update(physics_loss(exec_out.get("aux_list", []), cfg=cfg))
         else:
-            zero = scene.mu.new_zeros(())
             out["physics_vol"], out["physics_contact"], out["physics_energy"], out["physics_total"] = \
                 zero, zero, zero, zero
 
-        # ── Stage-aware ramp for L_comm ─────────────────────────────
-        comm_w = self._anneal(cfg["lambda_comm"], cfg["lambda_comm_max"], step, total_steps) \
-                 if is_full else cfg["lambda_comm"]
+        # ── L_comm weight ramp ──────────────────────────────────────
+        comm_w = (self._anneal(cfg["lambda_comm"], cfg["lambda_comm_max"], step, total_steps)
+                  if spec.anneal_comm else cfg["lambda_comm"])
 
         # ── Total ───────────────────────────────────────────────────
         total = (
@@ -820,9 +891,20 @@ def hierarchical_accuracy(
     planner, encoder, task_emb: torch.Tensor,
     sampling_cfg: Optional[Dict[str, Any]] = None,
 ) -> float:
-    """Cosine sim between input task_emb and re-encoded task_emb (eval-only)."""
-    with torch.no_grad():
-        loss = hierarchical_loss(planner, encoder, None, task_emb, sampling_cfg)
+    """Cosine sim between input task_emb and re-encoded task_emb (eval-only).
+
+    Forces ``planner.eval()`` for the call to prevent the TaskTokenizer EMA
+    update path from firing (would silently mutate the codebook even though
+    this is an "accuracy" metric).  Restores the original mode afterwards.
+    """
+    was_training = planner.training
+    planner.eval()
+    try:
+        with torch.no_grad():
+            loss = hierarchical_loss(planner, encoder, None, task_emb, sampling_cfg)
+    finally:
+        if was_training:
+            planner.train()
     return float(1.0 - loss.item())          # convert distance back to similarity
 
 

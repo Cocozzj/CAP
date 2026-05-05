@@ -43,7 +43,7 @@ class PhysicsParams:
     friction_coeff:  torch.Tensor      # [M, 1]   Coulomb friction μ ∈ [0, 1]
     damping:         torch.Tensor      # [M, 1]   velocity damping ∈ [0, 1]
     dt:              torch.Tensor      # [M, 1]   per-object timestep
-    n_iters:         int = 4           # PBD iteration count   (RhoParser default)
+    n_iters:         int = 5           # PBD iteration count   (RhoParser default)
     n_substeps:      int = 2           # Verlet substep count  (RhoParser default)
 
 

@@ -102,7 +102,7 @@ class Encoder(nn.Module):
         # obj_out: {slots, attn, assignment, logits, phi}
 
         # Compute visibility mask (Dataset-B: occlusions possible); When all slots are visible (Dataset-A), pass None for fast avg_pool path.
-        mask = attention_to_visibility(obj_out["attn"],self.self.visibility_threshold)
+        mask = attention_to_visibility(obj_out["attn"], self.visibility_threshold)
         if mask.bool().all():
             mask = None
 
@@ -137,7 +137,9 @@ class Encoder(nn.Module):
 
             # Stage 3 → training.py (losses)
             "vq_loss": act_out["vq_loss"],
-            "recon": act_out["recon"],
-            "sub_quantized": act_out["sub_quantized"],       # "l": q_l, [B, T, K, d_l]; "h": q_h, [B, T, K, d_h]; "xi": q_xi, [B, T, K, d_xi]; "rho": q_rho, [B, T, K, d_rho]
+            # NOTE: act_out also has "recon" and "sub_quantized"; they are
+            # consumed inside ActionTokenizer for the internal VQ loss but
+            # nothing downstream uses them, so we drop them here to keep the
+            # public Encoder output minimal.  Re-add if you wire a recon loss.
             "physical_params": act_out["physical_params"],   # "translation", [B, T, K, 3]; "rotation", [B, T, K, 9]; "micro_rotation", [B, T, K, 3]; "deformation", [B, T, K, n] or None
         }

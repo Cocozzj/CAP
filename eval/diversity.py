@@ -26,9 +26,9 @@ from typing import List
 import torch
 
 from model import build_scene_state
-from dataloader import ToyDataset, collate_batch
 
-from .utils import add_common_eval_args, load_model_for_eval, get_output_dir
+from .utils import (add_common_eval_args, add_data_args, build_eval_loader,
+                    get_output_dir, load_model_for_eval)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -111,6 +111,7 @@ def terminal_state_variance(final_states: List) -> float:
 def main():
     parser = argparse.ArgumentParser()
     add_common_eval_args(parser)
+    add_data_args(parser, default_split="val")
     parser.add_argument("--texts", nargs="+", required=True)
     parser.add_argument("--num-samples", type=int, default=16,
                         help="How many samples to draw per text prompt")
@@ -135,8 +136,8 @@ def main():
     per_prompt = {}
 
     sh_dim = cfg["gs_param"]["gs_dimension"] - 11
-    ds = ToyDataset(n_samples=B, sh_dim=sh_dim)
-    batch = collate_batch([ds[i] for i in range(B)])
+    ds, loader = build_eval_loader(args, sh_dim, n_samples=B, batch_size=B)
+    batch = next(iter(loader))
     gs_params = [g.to(device) for g in batch["gs_params"]]
     enc_out = model.encode(batch["frames"].to(device),
                                 gs_params=gs_params, tau=1.0)

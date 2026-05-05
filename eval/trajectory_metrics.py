@@ -28,9 +28,9 @@ import torch
 
 from model import build_scene_state, SceneState
 from model.utils import masked_mean
-from dataloader import ToyDataset, collate_batch
 
-from .utils import add_common_eval_args, load_model_for_eval, get_output_dir
+from .utils import (add_common_eval_args, add_data_args, build_eval_loader,
+                    get_output_dir, load_model_for_eval)
 
 
 def _per_object_com(state: SceneState) -> torch.Tensor:
@@ -70,6 +70,7 @@ def trajectory_ADE_FDE_MPJPE(
 def main():
     parser = argparse.ArgumentParser()
     add_common_eval_args(parser)
+    add_data_args(parser, default_split="test_iid")
     parser.add_argument("--n-batches",  type=int, default=8)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--enable-physics", action="store_true")
@@ -89,14 +90,19 @@ def main():
         print("        For real evaluation, pair against PartNet-Mobility GT trajectories.")
 
     sh_dim = cfg["gs_param"]["gs_dimension"] - 11
-    dataset = ToyDataset(n_samples=args.n_batches * args.batch_size, sh_dim=sh_dim)
+    dataset, loader = build_eval_loader(
+        args, sh_dim,
+        n_samples=args.n_batches * args.batch_size,
+        batch_size=args.batch_size,
+    )
+    n_batches_actual = min(args.n_batches, len(loader))
 
     ade_vals, fde_vals, mpjpe_vals = [], [], []
 
     with torch.no_grad():
-        for b in range(args.n_batches):
-            indices = list(range(b * args.batch_size, (b + 1) * args.batch_size))
-            batch = collate_batch([dataset[i] for i in indices])
+        for b, batch in enumerate(loader):
+            if b >= n_batches_actual:
+                break
             frames    = batch["frames"].to(device)
             gs_params = [g.to(device) for g in batch["gs_params"]]
 
@@ -119,7 +125,7 @@ def main():
             ade_vals.append(metrics["ADE"])
             fde_vals.append(metrics["FDE"])
             mpjpe_vals.append(metrics["MPJPE"])
-            print(f"  batch {b + 1:>3d}/{args.n_batches}: "
+            print(f"  batch {b + 1:>3d}/{n_batches_actual}: "
                   f"ADE={metrics['ADE']:.4f}  FDE={metrics['FDE']:.4f}  "
                   f"MPJPE={metrics['MPJPE']:.4f}")
 

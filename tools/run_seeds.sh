@@ -58,7 +58,7 @@ for SEED in "${SEEDS[@]}"; do
     echo "▶ seed=${SEED}  →  ${OUT}"
     echo "─────────────────────────────────────────────────────────────"
 
-    "${LAUNCH[@]}" training.py \
+    "${LAUNCH[@]}" -m train.trainer \
         --config configs/config.yaml \
         --loss-config configs/loss.yaml \
         --out-dir "${OUT}" \

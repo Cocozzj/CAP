@@ -59,10 +59,10 @@ import numpy as np
 import torch
 
 from model import build_scene_state
-from dataloader import ToyDataset, collate_batch
+from dataload import collate_batch
 
-from eval.utils import load_model_for_eval
-from eval.render_hook import available_backend
+from ..utils import add_data_args, build_eval_loader, load_model_for_eval
+from ..render_hook import available_backend
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -196,7 +196,8 @@ def main():
     p.add_argument("--renderer",    type=str, default="auto",
                    choices=["auto", "gsplat", "scatter"])
     p.add_argument("--scene-index", type=int, default=0,
-                   help="Which ToyDataset index to use as the initial scene")
+                   help="Which DatasetA index to use as the initial scene")
+    add_data_args(p, default_split="val")
     args = p.parse_args()
 
     out = Path(args.output_dir); (out / "cells").mkdir(parents=True, exist_ok=True)
@@ -242,11 +243,15 @@ def main():
             ns = SimpleNamespace(
                 ckpt=str(ckpt_path), config=None,
                 device=args.device, output_dir=None,
+                manifest=args.manifest, data_dir=args.data_dir,
+                split=args.split, T=args.T, image_size=args.image_size,
             )
             model, cfg, dev = load_model_for_eval(ns)
 
             sh_dim = cfg["gs_param"]["gs_dimension"] - 11
-            ds = ToyDataset(n_samples=args.scene_index + 1, sh_dim=sh_dim)
+            ds, _ = build_eval_loader(
+                ns, sh_dim, n_samples=args.scene_index + 1,
+            )
             scene_batch = collate_batch([ds[args.scene_index]])
 
             with torch.no_grad():

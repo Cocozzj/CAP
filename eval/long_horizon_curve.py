@@ -40,9 +40,10 @@ from typing import Dict, List
 import torch
 
 from model import build_scene_state
-from dataloader import ToyDataset, collate_batch
+from dataload import collate_batch
 
-from .utils import add_common_eval_args, load_model_for_eval, get_output_dir
+from .utils import (add_common_eval_args, add_data_args, build_eval_loader,
+                    get_output_dir, load_model_for_eval)
 from .success_rate import SUCCESS_CRITERIA
 
 
@@ -80,6 +81,7 @@ def _plan_for_length(model, text: str, K: int, T: int) -> torch.Tensor:
 def main():
     parser = argparse.ArgumentParser()
     add_common_eval_args(parser)
+    add_data_args(parser, default_split="test_compositional_long")
     parser.add_argument("--tasks", nargs="+", required=True)
     parser.add_argument("--lengths", nargs="+", type=int,
                         default=[2, 3, 4, 5, 6, 7, 8],
@@ -93,7 +95,8 @@ def main():
     out_dir = get_output_dir(args, "long_horizon_curve")
 
     sh_dim = cfg["gs_param"]["gs_dimension"] - 11
-    ds = ToyDataset(n_samples=args.n_trials, sh_dim=sh_dim)
+    ds, loader = build_eval_loader(args, sh_dim, n_samples=args.n_trials)
+    n_trials_actual = min(args.n_trials, len(ds))
 
     print(f"\n=== Long-horizon curve ===")
     print(f"  tasks   = {args.tasks}")
@@ -111,7 +114,7 @@ def main():
 
             for T in args.lengths:
                 successes = 0
-                for trial in range(args.n_trials):
+                for trial in range(n_trials_actual):
                     batch = collate_batch([ds[trial]])
                     gs_params = [g.to(device) for g in batch["gs_params"]]
                     enc_out = model.encode(
@@ -131,14 +134,14 @@ def main():
                     ok = bool(criterion(scene, exec_out["final_state"]).any().item())
                     successes += int(ok)
 
-                rate = successes / max(args.n_trials, 1)
+                rate = successes / max(n_trials_actual, 1)
                 per_task[txt][T] = {
                     "success_rate": rate,
                     "n_succeeded":  successes,
-                    "n_trials":     args.n_trials,
+                    "n_trials":     n_trials_actual,
                 }
                 per_length_succ[T].append(rate)
-                print(f"     T={T}: {rate * 100:5.1f}%  ({successes}/{args.n_trials})")
+                print(f"     T={T}: {rate * 100:5.1f}%  ({successes}/{n_trials_actual})")
 
     per_length = {
         T: float(sum(rs) / len(rs)) if rs else 0.0

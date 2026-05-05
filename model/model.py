@@ -3,37 +3,31 @@ CAPModel — top-level orchestrator for CAP-A2GN.
 
 Pipeline
 ────────
-    Encoder  (Stage 1):  frames → slots → motion → VQ tokens + physical_params
-    Planner  (Stage 2):  token sequence → task token → CVAE → AR decode
-    Executor (Stage 3):  SceneState + physical_params → new SceneState
+    Encoder  : frames → slots → motion → VQ tokens + physical_params
+    Planner  : token sequence → task token → CVAE → AR decode
+    Executor : SceneState + physical_params → new SceneState
 
-Training (3-stage curriculum, see PDF f07d2c0a §2.4 / fdfa011c §5.1)
-───────────────────────────────────────────────────────────────────
-    Stage 0 RIGID    Encoder + Executor.rigid trainable; Planner frozen, physics OFF
-    Stage 1 PHYSICS  Executor.deform only; everything else frozen, physics ON
-    Stage 2 FULL     all trainable; full loss suite; CVAE β + L_comm annealed
+Curriculum agnostic
+───────────────────
+This module knows NOTHING about training stages.  Caller (``training.py``)
+controls per-stage behaviour via two explicit knobs:
+
+    model.set_trainable(encoder=..., planner=..., executor=..., deform_only=...)
+    out = model(frames, gs_params=..., enable_physics=...)
 
 Public API surface
 ──────────────────
     Construction
         __init__(cfg)
     Training (used by training.py)
-        forward(frames, gs_params, ...)         → training_out dict for CAPLoss
-        set_stage(stage)                        → flip requires_grad per stage
+        forward(frames, gs_params, *, enable_physics, ...)  → training_out for CAPLoss
+        set_trainable(*, encoder, planner, executor, deform_only) → flip requires_grad
     Inference modes
-        infer_text(texts, scene)                → Mode A
-        infer_imitation(demo_frames, gs, scene) → Mode B
-        infer_composite(text_list, scene)       → Mode C
-        transfer_action(scene, tokens, src, tgt) → cross-object (Prop 3)
+        infer_text / infer_imitation / infer_composite / transfer_action
     Building blocks (used by eval/)
-        encode(frames, gs_params)               → Encoder only
-        plan_from_text(texts)                   → Planner only
-        plan_composite_from_texts(text_list)    → composite Planner only
-        text_to_task(texts)                     → text-only LanguageEncoder lookup
-        execute_sequence(scene, physical_params_seq) → Executor only
+        encode / plan_from_text / plan_composite_from_texts / text_to_task / execute_sequence
     Token utilities (used by eval/)
-        unflatten_plan(plan, K)
-        tokens_to_physical_params(plan_tokens)
+        unflatten_plan / tokens_to_physical_params
 """
 
 from __future__ import annotations
@@ -50,28 +44,11 @@ from .utils import GSParameter, SceneState, build_scene_state
 
 
 # ══════════════════════════════════════════════════════════════════════
-# Training stage enum
-# ══════════════════════════════════════════════════════════════════════
-
-class TrainingStage:
-    RIGID   = 0    # Encoder + Executor.rigid (Planner frozen, physics OFF)
-    PHYSICS = 1    # Executor.deform only       (rest frozen, physics ON)
-    FULL    = 2    # all trainable              (physics ON, all losses on)
-
-
-# ══════════════════════════════════════════════════════════════════════
 # CAPModel
 # ══════════════════════════════════════════════════════════════════════
 
 class CAPModel(nn.Module):
     """End-to-end CAP-A2GN model: Encoder + Planner + Executor."""
-
-    # Stage → (encoder trainable, planner trainable, executor trainable, deform-only)
-    _STAGE_TABLE: Dict[int, Tuple[bool, bool, bool, bool]] = {
-        TrainingStage.RIGID:   (True,  False, True,  False),
-        TrainingStage.PHYSICS: (False, False, False, True),
-        TrainingStage.FULL:    (True,  True,  True,  False),
-    }
 
     # ────────────────────────────────────────────────────────────────
     # A. Construction
@@ -152,8 +129,6 @@ class CAPModel(nn.Module):
         # Materials registry — exposed as model.materials for eval scripts
         self.materials: Dict[str, Dict[str, float]] = exec_cfg.get("materials", {}) or {}
 
-        self._stage = TrainingStage.RIGID
-
     # ────────────────────────────────────────────────────────────────
     # B. Properties
     # ────────────────────────────────────────────────────────────────
@@ -168,106 +143,137 @@ class CAPModel(nn.Module):
         """Task VQ codebook weight  [J, task_dim]."""
         return self.planner.task_codebook_weight()
 
-    @property
-    def stage(self) -> int:
-        return self._stage
-
     # ────────────────────────────────────────────────────────────────
-    # C. Stage management (data-driven)
+    # C. Trainable flags
     # ────────────────────────────────────────────────────────────────
+    def set_trainable(
+        self,
+        *,
+        encoder:     bool = True,
+        planner:     bool = True,
+        executor:    bool = True,
+        deform_only: bool = False,
+    ) -> None:
+        """Flip ``requires_grad`` on the 3 sub-modules.
 
-    def set_stage(self, stage: int) -> None:
-        """Flip ``requires_grad`` per the curriculum table.  See ``_STAGE_TABLE``."""
-        if stage not in self._STAGE_TABLE:
-            raise ValueError(f"Unknown training stage: {stage}")
-        enc_train, plan_train, exec_train, deform_only = self._STAGE_TABLE[stage]
-        self._stage = stage
-
-        # Encoder
-        self._set_requires_grad(self.encoder, enc_train)
-        if enc_train and self.encoder.obj_enc.freeze_backbone:
-            self._set_requires_grad(self.encoder.obj_enc.backbone, False)
-
-        # Planner (always re-freeze the text encoder backbone if planner is on)
-        self._set_requires_grad(self.planner, plan_train)
-        if plan_train:
-            self._set_requires_grad(self.planner.lang.text_enc, False)
-
-        # Executor: special PHYSICS-stage handling ─ only deform branch trainable
+        ``deform_only=True`` overrides ``executor`` — only ``executor.deform``
+        trains (physics-only stage).  Pretrained CLIP text encoder always
+        stays frozen; DINO backbone stays frozen iff
+        ``obj_enc.freeze_backbone=True`` (config-gated).
+        """
+        self._req(self.encoder,  encoder)
+        self._req(self.planner,  planner)
+        self._req(self.executor, executor and not deform_only)
         if deform_only:
-            self._set_requires_grad(self.executor, False)
-            if hasattr(self.executor, "deform"):
-                self._set_requires_grad(self.executor.deform, True)
-        else:
-            self._set_requires_grad(self.executor, exec_train)
+            self._req(self.executor.deform, True)
+        # Always re-freeze pretrained backbones (idempotent, no need to gate)
+        if self.encoder.obj_enc.freeze_backbone:
+            self._req(self.encoder.obj_enc.backbone, False)
+        self._req(self.planner.lang.text_enc, False)
 
     @staticmethod
-    def _set_requires_grad(module: nn.Module, requires_grad: bool) -> None:
-        for p in module.parameters():
-            p.requires_grad = requires_grad
+    def _req(m: nn.Module, flag: bool) -> None:
+        for p in m.parameters():
+            p.requires_grad = flag
 
     # ────────────────────────────────────────────────────────────────
-    # D. Training forward (one method)
+    # D. Training forward
     # ────────────────────────────────────────────────────────────────
 
     def forward(
         self,
         frames:    torch.Tensor,                   # [B, V, T, C, H, W]
         gs_params: List[GSParameter],              # len B
+        *,
+        enable_physics: bool,                      # caller decides per-stage
+        run_planner:    bool = True,               # set False to skip Planner
         tau: float = 1.0,
         condition: Optional[Dict[str, Any]] = None,
-        enable_physics: Optional[bool] = None,     # None → derive from stage
+        cameras:   Optional[Dict[str, torch.Tensor]] = None,   # {intrinsics, extrinsics}
     ) -> Dict[str, Any]:
-        """Unified training forward — runs Encoder → Planner → Executor.
+        """Unified training forward — runs Encoder → (Planner) → Executor → (Renderer).
 
-        Returns the ``training_out`` dict consumed by ``CAPLoss``::
+        ``cameras`` (optional): if provided + gsplat installed, render the
+        trajectory and stuff ``rendered_frames`` / ``rendered_depth`` into
+        ``exec_out`` so rec / lpips / depth losses can compute non-zero values.
+        Without it those losses early-exit to 0 (loss.py:reconstruction_loss).
+
+        Returns:
 
             {
               "encoder":       full Encoder output (incl. physical_params)
-              "planner":       full Planner training output
-              "executor":      {final_state, trajectory, aux_list}
+              "planner":       full Planner training output  (or {} if skipped)
+              "executor":      {final_state, trajectory, aux_list,
+                                rendered_frames?, rendered_depth?, rendered_timesteps?}
               "scene_state":   initial SceneState
-              "token_indices": [B, L] flat AR target tokens
+              "token_indices": [B, L] flat AR target tokens   (or None if skipped)
             }
         """
-        if enable_physics is None:
-            enable_physics = (self._stage >= TrainingStage.PHYSICS)
         cond = condition or {}
 
-        # ── Encoder (Stage 1) ─────────────────────────────────────
+        # ── Encoder (always) ──────────────────────────────────────
         enc_out = self.encoder(frames, tau=tau, gs_params=gs_params)
 
-        # ── Flatten token grid → 1D sequence for Planner ─────────
-        B = enc_out["seq_tokens"].size(0)
-        token_indices = enc_out["seq_tokens"].reshape(B, -1).clone()
-        if enc_out["seq_mask"] is not None:
-            flat_mask = enc_out["seq_mask"].reshape(B, -1)
-            token_indices[~flat_mask] = self._pad_id
-
-        # ── Planner (Stage 2) ─────────────────────────────────────
-        plan_out = self.planner.training_forward(
-            token_indices=token_indices,
-            atomic_codebook=self.atomic_codebook,
-            text_labels=cond.get("texts"),
-            sample_prob=float(cond.get("sample_prob", 0.0)),
-            deterministic=bool(cond.get("deterministic", False)),
-        )
-
-        # ── SceneState from gs_params + Encoder's phi ─────────────
+        # ── SceneState (needs Encoder phi, used by both branches) ─
         scene_state = build_scene_state(
             gs_params=gs_params,
             phi=enc_out["phi"],
             assignment=enc_out["assignment"],
         )
 
-        # ── Executor (Stage 3) — direct physical_params from Encoder
-        task_context = self._expand_task_context(plan_out["task_emb"], scene_state.K)
+        # ── Planner (optional) ────────────────────────────────────
+        if run_planner:
+            B = enc_out["seq_tokens"].size(0)
+            token_indices = enc_out["seq_tokens"].reshape(B, -1).clone()
+            if enc_out["seq_mask"] is not None:
+                flat_mask = enc_out["seq_mask"].reshape(B, -1)
+                token_indices[~flat_mask] = self._pad_id
+
+            plan_out = self.planner.training_forward(
+                token_indices=token_indices,
+                atomic_codebook=self.atomic_codebook,
+                text_labels=cond.get("texts"),
+                sample_prob=float(cond.get("sample_prob", 0.0)),
+                deterministic=bool(cond.get("deterministic", False)),
+            )
+            task_context = self._expand_task_context(plan_out["task_emb"], scene_state.K)
+        else:
+            plan_out      = {}                  # CAPLoss reads via .get(...) — empty is fine
+            token_indices = None                # loss skips terms that need it
+            task_context  = None                # Executor accepts None (no conditioning)
+
+        # ── Executor (always) — direct physical_params from Encoder
         exec_out = self.execute_sequence(
             scene=scene_state,
             physical_params_seq=enc_out["physical_params"],
             enable_physics=enable_physics,
             task_context=task_context,
         )
+
+        # ── Render trajectory (optional) — populates rec_loss inputs ──
+        # Caller controls density via condition["render_n_timesteps"]:
+        #   None → 2 (initial + final, default)    0 → skip rendering entirely
+        #   k    → k uniformly-spaced timesteps over [0, T]
+        # Or pass condition["render_timesteps"]=[...] for explicit indices.
+        if cameras is not None and "intrinsics" in cameras and "extrinsics" in cameras:
+            from .executor.renderer import gsplat_available, render_trajectory
+            if gsplat_available():
+                H, W = int(frames.shape[-2]), int(frames.shape[-1])
+                rendered = render_trajectory(
+                    initial_scene    = scene_state,
+                    trajectory       = exec_out.get("trajectory", []),
+                    intrinsics       = cameras["intrinsics"],
+                    extrinsics       = cameras["extrinsics"],
+                    image_size       = (H, W),
+                    render_depth     = True,
+                    timestep_indices = cond.get("render_timesteps"),
+                    n_timesteps      = cond.get("render_n_timesteps"),
+                )
+                if rendered is not None:
+                    exec_out["rendered_frames"]    = rendered["rgb"]    # [B, V, T_r, 3, H, W]
+                    exec_out["rendered_depth"]     = rendered["depth"]  # [B, V, T_r, 1, H, W]
+                    exec_out["rendered_timesteps"] = rendered["timestep_indices"]
+                    exec_out["rendered_T_total"]   = rendered["T_total"]
 
         return {
             "encoder":       enc_out,

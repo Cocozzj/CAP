@@ -104,9 +104,11 @@ class Executor(nn.Module):
         router_hard: bool = False,
         max_delta_mu: float = 1.0,
         # ── Optional sub-component config dicts (each None → defaults) ──
+        # NOTE: PBD's per-step iteration counts (n_iters, n_substeps) flow into
+        # RhoParser via rho_parser_cfg, NOT into ShapeMatchingPBD directly —
+        # that's why this signature has no pbd_backend_cfg.
         rho_parser_cfg:    Optional[Dict] = None,
         rigid_contact_cfg: Optional[Dict] = None,
-        pbd_backend_cfg:   Optional[Dict] = None,
         # ── Ablation: restrict to a subset of physics backends ──
         enabled_backends:  Optional[List[str]] = None,
     ) -> None:
@@ -130,7 +132,6 @@ class Executor(nn.Module):
             max_delta_mu=max_delta_mu,
             rho_parser_cfg=rho_parser_cfg,
             rigid_contact_cfg=rigid_contact_cfg,
-            pbd_backend_cfg=pbd_backend_cfg,
             enabled_backends=enabled_backends,
         )
 
@@ -195,7 +196,7 @@ class Executor(nn.Module):
         rho_summary_flat, preview_params = self.deform.physics_summary(
             rho_flat, tc_flat,
         )
-        rho_summary = rho_summary_flat.reshape(B, K, 4)
+        rho_summary = rho_summary_flat.reshape(B, K, -1)        # auto-fit summary dim
         
         # ── Step 1: world → canonical ───────────────────────────────
         mu_can, cov_can = to_canonical(scene.mu, scene.cov, scene.phi)

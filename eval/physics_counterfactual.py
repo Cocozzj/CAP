@@ -24,15 +24,16 @@ from pathlib import Path
 import torch
 
 from model import build_scene_state
-from dataloader import ToyDataset, collate_batch
 
 from .metrics import scene_distance_metric
-from .utils import add_common_eval_args, load_model_for_eval, get_output_dir
+from .utils import (add_common_eval_args, add_data_args, build_eval_loader,
+                    get_output_dir, load_model_for_eval)
 
 
 def main():
     parser = argparse.ArgumentParser()
     add_common_eval_args(parser)
+    add_data_args(parser, default_split="test_iid")
     parser.add_argument("--n-clips", type=int, default=4)
     args = parser.parse_args()
 
@@ -46,8 +47,10 @@ def main():
 
     # Encode the same demo once
     sh_dim = cfg["gs_param"]["gs_dimension"] - 11
-    ds = ToyDataset(n_samples=args.n_clips, sh_dim=sh_dim)
-    batch = collate_batch([ds[i] for i in range(args.n_clips)])
+    ds, loader = build_eval_loader(
+        args, sh_dim, n_samples=args.n_clips, batch_size=args.n_clips,
+    )
+    batch = next(iter(loader))
     gs_params = [g.to(device) for g in batch["gs_params"]]
     enc_out = model.encode(batch["frames"].to(device),
                                 gs_params=gs_params, tau=1.0)

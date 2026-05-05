@@ -102,7 +102,12 @@ class RhoParser(nn.Module):
         friction = self.head_friction(rho).sigmoid()                # [0, 1]
         damping  = self.head_damping(rho).sigmoid() * 0.5           # [0, 0.5]
 
-        # ── Timestep (per-object positive scalar) ────────────────────
+        # ── Timestep (per-object learned positive scalar) ─────────────
+        # Range [1e-4, 1e-2] s = [0.1ms, 10ms].  Tighter than the PDF's
+        # nominal 1/30 s (33ms) — chosen to follow standard PBD practice
+        # (Müller 2007 et seq.: dt ≤ 10ms keeps the 5-iter constraint
+        # solver stable across rubber/foam/cloth.  Learned per-object so
+        # the network adapts step size to material stiffness.
         dt_raw = self.head_dt(rho)
         dt_raw = torch.nan_to_num(dt_raw, nan=0.0, posinf=1e4, neginf=-1e4)
         dt     = F.softplus(dt_raw) * 0.01 + 1e-4   # ~1e-4 .. ~1e-2 seconds

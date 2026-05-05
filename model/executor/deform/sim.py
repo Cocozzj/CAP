@@ -34,7 +34,12 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 
-from ..physics import PhysicsParams
+from ..physics import (
+    PhysicsParams,
+    RigidContactBackend,
+    ShapeMatchingPBD,
+    MPMBackend,
+)
 from ...utils import (
     cov_to_log_euclidean,
     log_euclidean_to_cov,
@@ -145,9 +150,12 @@ class DeformSim(nn.Module):
         router_hard: bool = False,
         max_delta_mu: float = 1.0,
         # ── Optional config passthroughs (each None → component default) ──
+        # PBD's n_iters / n_substeps come in via rho_parser_cfg (RhoParser owns
+        # those hyperparameters and threads them into PhysicsParams), NOT via
+        # a separate pbd_backend_cfg here.  ShapeMatchingPBD currently has no
+        # constructor kwargs the model would override.
         rho_parser_cfg: Optional[Dict[str, Any]] = None,
         rigid_contact_cfg: Optional[Dict[str, Any]] = None,
-        pbd_backend_cfg:   Optional[Dict[str, Any]] = None,
         # ── Ablation: restrict to a subset of physics backends ──
         enabled_backends: Optional[List[str]] = None,
     ) -> None:
@@ -158,9 +166,8 @@ class DeformSim(nn.Module):
                           per axis as a NaN/explosion safety net.  Tune to
                           your scene scale (~0.1 for tabletop, ~10 for room).
             rho_parser_cfg:    extra kwargs for RhoParser (e.g.
-                               ``{"n_iters": 4, "n_substeps": 2}``).
+                               ``{"n_iters": 5, "n_substeps": 2}``).
             rigid_contact_cfg: kwargs for RigidContactBackend.
-            pbd_backend_cfg:   kwargs for ShapeMatchingPBD.
             enabled_backends:  list of backend names to instantiate (default =
                                all 3).  Use to ablate single-backend variants
                                (PDF main proposal §5.2 ablation table — e.g.
@@ -189,7 +196,7 @@ class DeformSim(nn.Module):
         # Build only the requested backends; PhysicsRouter's logit head sizes to len(backends)
         backend_factories = {
             "rigid_contact": lambda: RigidContactBackend(**(rigid_contact_cfg or {})),
-            "pbd":           lambda: ShapeMatchingPBD(**(pbd_backend_cfg or {})),
+            "pbd":           lambda: ShapeMatchingPBD(),
             "mpm":           lambda: MPMBackend(),
         }
         backends = {name: backend_factories[name]() for name in enabled}

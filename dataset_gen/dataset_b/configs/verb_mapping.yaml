@@ -1,0 +1,77 @@
+# SSv2 class-name -> Dataset-B atomic verb mapping.
+#
+# Templates are exactly as they appear in SSv2's train.json `template` field
+# (bracketed form, e.g. "Closing [something]"). They were verified against
+# the labels.json present at /home/zejun/CAP-A2GN/data_gen/raw_data/ssv2.
+#
+# Total available SSv2 clips per template ≈ 1100, so any verb that draws
+# from >= 1 template easily clears our target_per_verb=125.
+
+verb_mapping:
+  open:
+    - "Opening [something]"
+    - "Pretending to open [something] without actually opening it"
+
+  close:
+    - "Closing [something]"
+    - "Pretending to close [something] without actually closing it"
+
+  pull:
+    - "Pulling [something] from left to right"
+    - "Pulling [something] from right to left"
+    - "Pulling [something] from behind of [something]"
+    - "Pulling [something] out of [something]"
+    - "Pulling [something] onto [something]"
+    - "Pulling two ends of [something] so that it gets stretched"
+    - "Pulling two ends of [something] so that it separates into two pieces"
+    # Skipped: "Pulling two ends of [something] but nothing happens" (no visible motion)
+    # Skipped: "Plugging [something] into [something] but pulling it right out as you remove your hand"
+    #          (compound motion, mostly hand swap)
+
+  push:
+    - "Pushing [something] from left to right"
+    - "Pushing [something] from right to left"
+    - "Pushing [something] off of [something]"
+    - "Pushing [something] onto [something]"
+    - "Pushing [something] so that it almost falls off but doesn't"
+    - "Pushing [something] so that it falls off the table"
+    - "Pushing [something] so that it slightly moves"
+    # Skipped: "Pushing [something] so it spins" -> goes to rotate
+    # Skipped: "Pushing [something] with [something]" (tool use, not direct push)
+
+  rotate:
+    - "Spinning [something] so it continues spinning"
+    - "Spinning [something] that quickly stops spinning"
+    - "Turning [something] upside down"
+    - "Pretending to turn [something] upside down"
+    - "Pushing [something] so it spins"      # push-induced rotation, motion is rotation
+    - "Poking [something] so that it spins around"
+
+  squeeze:
+    - "Squeezing [something]"
+    - "Pretending to squeeze [something]"
+
+  fold:
+    - "Folding [something]"
+    - "Unfolding [something]"
+
+  pour:
+    - "Pouring [something] into [something]"
+    - "Pouring [something] onto [something]"
+    - "Pouring [something] out of [something]"
+    - "Pouring [something] into [something] until it overflows"
+    - "Pretending to pour [something] out of [something], but [something] is empty"
+    # Skipped: "Trying to pour [something] into [something], but missing so it spills next to it"
+    #          (failed-pour, atypical motion)
+
+# Audit summary (filled in after Step 1 runs):
+# verb     | n_templates | est_clips_avail
+# open     |     2       |   ~2200
+# close    |     2       |   ~2200
+# pull     |     7       |   ~7700
+# push     |     7       |   ~7700
+# rotate   |     6       |   ~6600
+# squeeze  |     2       |   ~2200
+# fold     |     2       |   ~2200
+# pour     |     5       |   ~5500
+# total    |    33       |  ~36000  (target = 1000, plenty of headroom)

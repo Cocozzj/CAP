@@ -1,0 +1,42 @@
+2026-05-04 21:37:44,592 [INFO] src.ssv2_loader: verb_mapping loaded: 33 templates across 8 verbs
+2026-05-04 21:37:44,915 [INFO] src.ssv2_loader: Loaded 168913 annotations from train
+2026-05-04 21:37:45,464 [INFO] src.ssv2_loader: Loaded 24777 annotations from validation
+2026-05-04 21:37:45,527 [INFO] src.ssv2_loader: Mapped clips per verb:
+2026-05-04 21:37:45,527 [INFO] src.ssv2_loader:   close      2310
+2026-05-04 21:37:45,527 [INFO] src.ssv2_loader:   fold       2312
+2026-05-04 21:37:45,527 [INFO] src.ssv2_loader:   open       3259
+2026-05-04 21:37:45,527 [INFO] src.ssv2_loader:   pour       2528
+2026-05-04 21:37:45,527 [INFO] src.ssv2_loader:   pull       5515
+2026-05-04 21:37:45,527 [INFO] src.ssv2_loader:   push       12399
+2026-05-04 21:37:45,527 [INFO] src.ssv2_loader:   rotate     6398
+2026-05-04 21:37:45,527 [INFO] src.ssv2_loader:   squeeze    3025
+2026-05-04 21:37:45,527 [INFO] src.ssv2_loader: Missing video files: 0
+2026-05-04 21:37:45,528 [INFO] src.ssv2_loader: Distinct unmapped templates: 141 (top 10 by count below)
+2026-05-04 21:37:45,528 [INFO] src.ssv2_loader:   [ 3584]  Putting [something] on a surface
+2026-05-04 21:37:45,528 [INFO] src.ssv2_loader:   [ 3529]  Moving [something] up
+2026-05-04 21:37:45,528 [INFO] src.ssv2_loader:   [ 3144]  Covering [something] with [something]
+2026-05-04 21:37:45,528 [INFO] src.ssv2_loader:   [ 3052]  Moving [something] down
+2026-05-04 21:37:45,528 [INFO] src.ssv2_loader:   [ 2738]  Uncovering [something]
+2026-05-04 21:37:45,528 [INFO] src.ssv2_loader:   [ 2635]  Taking [one of many similar things on the table]
+2026-05-04 21:37:45,528 [INFO] src.ssv2_loader:   [ 2480]  Putting [something] into [something]
+2026-05-04 21:37:45,528 [INFO] src.ssv2_loader:   [ 2438]  Throwing [something]
+2026-05-04 21:37:45,528 [INFO] src.ssv2_loader:   [ 2266]  Tearing [something] into two pieces
+2026-05-04 21:37:45,528 [INFO] src.ssv2_loader:   [ 2234]  Putting [something] next to [something]
+2026-05-04 21:37:45,533 [INFO] root: verb=close : sampled 125 / 2310 available
+2026-05-04 21:37:45,535 [INFO] root: verb=fold : sampled 125 / 2312 available
+2026-05-04 21:37:45,536 [INFO] root: verb=open : sampled 125 / 3259 available
+2026-05-04 21:37:45,538 [INFO] root: verb=pour : sampled 125 / 2528 available
+2026-05-04 21:37:45,540 [INFO] root: verb=pull : sampled 125 / 5515 available
+2026-05-04 21:37:45,546 [INFO] root: verb=push : sampled 125 / 12399 available
+2026-05-04 21:37:45,548 [INFO] root: verb=rotate : sampled 125 / 6398 available
+2026-05-04 21:37:45,550 [INFO] root: verb=squeeze : sampled 125 / 3025 available
+2026-05-04 21:37:45,564 [INFO] root: Wrote 1000 clips -> outputs/curated_clips.json
+2026-05-04 21:37:45,564 [INFO] root: Per-verb breakdown:
+2026-05-04 21:37:45,564 [INFO] root:   close      125
+2026-05-04 21:37:45,564 [INFO] root:   fold       125
+2026-05-04 21:37:45,564 [INFO] root:   open       125
+2026-05-04 21:37:45,564 [INFO] root:   pour       125
+2026-05-04 21:37:45,564 [INFO] root:   pull       125
+2026-05-04 21:37:45,564 [INFO] root:   push       125
+2026-05-04 21:37:45,564 [INFO] root:   rotate     125
+2026-05-04 21:37:45,564 [INFO] root:   squeeze    125

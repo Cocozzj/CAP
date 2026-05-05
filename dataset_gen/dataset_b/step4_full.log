@@ -1,0 +1,23 @@
+2026-05-04 22:00:54,935 [INFO] root: Building init_gs.ply for 1000 trajectories with 8 workers
+[50/1000] ok=50 skip=0 fail=0  avg=0.08s/clip  elapsed=0.0min  eta=0.2min
+[100/1000] ok=100 skip=0 fail=0  avg=0.07s/clip  elapsed=0.0min  eta=0.1min
+[150/1000] ok=150 skip=0 fail=0  avg=0.07s/clip  elapsed=0.0min  eta=0.1min
+[200/1000] ok=200 skip=0 fail=0  avg=0.07s/clip  elapsed=0.0min  eta=0.1min
+[250/1000] ok=250 skip=0 fail=0  avg=0.07s/clip  elapsed=0.0min  eta=0.1min
+[300/1000] ok=300 skip=0 fail=0  avg=0.07s/clip  elapsed=0.0min  eta=0.1min
+[350/1000] ok=350 skip=0 fail=0  avg=0.07s/clip  elapsed=0.1min  eta=0.1min
+[400/1000] ok=400 skip=0 fail=0  avg=0.07s/clip  elapsed=0.1min  eta=0.1min
+[450/1000] ok=450 skip=0 fail=0  avg=0.07s/clip  elapsed=0.1min  eta=0.1min
+[500/1000] ok=500 skip=0 fail=0  avg=0.07s/clip  elapsed=0.1min  eta=0.1min
+[550/1000] ok=550 skip=0 fail=0  avg=0.07s/clip  elapsed=0.1min  eta=0.1min
+[600/1000] ok=600 skip=0 fail=0  avg=0.07s/clip  elapsed=0.1min  eta=0.1min
+[650/1000] ok=650 skip=0 fail=0  avg=0.07s/clip  elapsed=0.1min  eta=0.0min
+[700/1000] ok=700 skip=0 fail=0  avg=0.07s/clip  elapsed=0.1min  eta=0.0min
+[750/1000] ok=750 skip=0 fail=0  avg=0.07s/clip  elapsed=0.1min  eta=0.0min
+[800/1000] ok=800 skip=0 fail=0  avg=0.07s/clip  elapsed=0.1min  eta=0.0min
+[850/1000] ok=850 skip=0 fail=0  avg=0.07s/clip  elapsed=0.1min  eta=0.0min
+[900/1000] ok=900 skip=0 fail=0  avg=0.07s/clip  elapsed=0.1min  eta=0.0min
+[950/1000] ok=950 skip=0 fail=0  avg=0.07s/clip  elapsed=0.1min  eta=0.0min
+[1000/1000] ok=1000 skip=0 fail=0  avg=0.07s/clip  elapsed=0.1min  eta=0.0min
+
+Done. ok=1000 skipped=0 failed=0 in 0.1min

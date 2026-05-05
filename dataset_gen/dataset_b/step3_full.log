@@ -1,0 +1,55 @@
+2026-05-04 21:54:33,523 [INFO] root: Estimating depth for 1000 trajectories on cuda
+2026-05-04 21:54:36,918 [INFO] src.depth_estimator: Loading DepthAnything-v2 (depth-anything/Depth-Anything-V2-Large-hf) on cuda
+2026-05-04 21:54:37,074 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/depth-anything/Depth-Anything-V2-Large-hf/resolve/main/processor_config.json "HTTP/1.1 404 Not Found"
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+2026-05-04 21:54:37,075 [WARNING] huggingface_hub.utils._http: Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+2026-05-04 21:54:37,173 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/depth-anything/Depth-Anything-V2-Large-hf/resolve/main/preprocessor_config.json "HTTP/1.1 307 Temporary Redirect"
+2026-05-04 21:54:37,179 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/depth-anything/Depth-Anything-V2-Large-hf/7581137eff8d4e94f6e796d3baea0e9fa79b22d2/preprocessor_config.json "HTTP/1.1 200 OK"
+2026-05-04 21:54:37,275 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/depth-anything/Depth-Anything-V2-Large-hf/resolve/main/processor_config.json "HTTP/1.1 404 Not Found"
+2026-05-04 21:54:37,378 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/depth-anything/Depth-Anything-V2-Large-hf/resolve/main/preprocessor_config.json "HTTP/1.1 307 Temporary Redirect"
+2026-05-04 21:54:37,385 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/depth-anything/Depth-Anything-V2-Large-hf/7581137eff8d4e94f6e796d3baea0e9fa79b22d2/preprocessor_config.json "HTTP/1.1 200 OK"
+2026-05-04 21:54:37,537 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/depth-anything/Depth-Anything-V2-Large-hf/resolve/main/config.json "HTTP/1.1 307 Temporary Redirect"
+2026-05-04 21:54:37,545 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/depth-anything/Depth-Anything-V2-Large-hf/7581137eff8d4e94f6e796d3baea0e9fa79b22d2/config.json "HTTP/1.1 200 OK"
+Loading weights:   0%|          | 0/503 [00:00<?, ?it/s]Loading weights:  89%|████████▉ | 448/503 [00:00<00:00, 4458.06it/s]Loading weights: 100%|██████████| 503/503 [00:00<00:00, 4471.21it/s]
+[25/1000] ok=20 skip=5 fail=0  avg=0.49s/clip  elapsed=0.2min  eta=8.0min
+[50/1000] ok=45 skip=5 fail=0  avg=0.34s/clip  elapsed=0.3min  eta=5.3min
+[75/1000] ok=70 skip=5 fail=0  avg=0.29s/clip  elapsed=0.3min  eta=4.5min
+[100/1000] ok=95 skip=5 fail=0  avg=0.27s/clip  elapsed=0.4min  eta=4.0min
+[125/1000] ok=120 skip=5 fail=0  avg=0.21s/clip  elapsed=0.5min  eta=3.1min
+[150/1000] ok=145 skip=5 fail=0  avg=0.21s/clip  elapsed=0.6min  eta=3.0min
+[175/1000] ok=170 skip=5 fail=0  avg=0.21s/clip  elapsed=0.7min  eta=2.9min
+[200/1000] ok=195 skip=5 fail=0  avg=0.21s/clip  elapsed=0.8min  eta=2.8min
+[225/1000] ok=220 skip=5 fail=0  avg=0.21s/clip  elapsed=0.9min  eta=2.7min
+[250/1000] ok=245 skip=5 fail=0  avg=0.21s/clip  elapsed=0.9min  eta=2.6min
+[275/1000] ok=270 skip=5 fail=0  avg=0.21s/clip  elapsed=1.0min  eta=2.5min
+[300/1000] ok=295 skip=5 fail=0  avg=0.21s/clip  elapsed=1.1min  eta=2.4min
+[325/1000] ok=320 skip=5 fail=0  avg=0.21s/clip  elapsed=1.2min  eta=2.3min
+[350/1000] ok=345 skip=5 fail=0  avg=0.21s/clip  elapsed=1.3min  eta=2.2min
+[375/1000] ok=370 skip=5 fail=0  avg=0.21s/clip  elapsed=1.4min  eta=2.2min
+[400/1000] ok=395 skip=5 fail=0  avg=0.22s/clip  elapsed=1.5min  eta=2.2min
+[425/1000] ok=420 skip=5 fail=0  avg=0.22s/clip  elapsed=1.6min  eta=2.1min
+[450/1000] ok=445 skip=5 fail=0  avg=0.22s/clip  elapsed=1.7min  eta=2.0min
+[475/1000] ok=470 skip=5 fail=0  avg=0.22s/clip  elapsed=1.7min  eta=1.9min
+[500/1000] ok=495 skip=5 fail=0  avg=0.21s/clip  elapsed=1.8min  eta=1.8min
+[525/1000] ok=520 skip=5 fail=0  avg=0.21s/clip  elapsed=1.9min  eta=1.6min
+[550/1000] ok=545 skip=5 fail=0  avg=0.21s/clip  elapsed=2.0min  eta=1.6min
+[575/1000] ok=570 skip=5 fail=0  avg=0.21s/clip  elapsed=2.1min  eta=1.5min
+[600/1000] ok=595 skip=5 fail=0  avg=0.21s/clip  elapsed=2.2min  eta=1.4min
+[625/1000] ok=620 skip=5 fail=0  avg=0.21s/clip  elapsed=2.3min  eta=1.3min
+[650/1000] ok=645 skip=5 fail=0  avg=0.21s/clip  elapsed=2.4min  eta=1.2min
+[675/1000] ok=670 skip=5 fail=0  avg=0.21s/clip  elapsed=2.4min  eta=1.1min
+[700/1000] ok=695 skip=5 fail=0  avg=0.21s/clip  elapsed=2.5min  eta=1.0min
+[725/1000] ok=720 skip=5 fail=0  avg=0.21s/clip  elapsed=2.6min  eta=0.9min
+[750/1000] ok=745 skip=5 fail=0  avg=0.21s/clip  elapsed=2.7min  eta=0.9min
+[775/1000] ok=770 skip=5 fail=0  avg=0.21s/clip  elapsed=2.8min  eta=0.8min
+[800/1000] ok=795 skip=5 fail=0  avg=0.21s/clip  elapsed=2.9min  eta=0.7min
+[825/1000] ok=820 skip=5 fail=0  avg=0.21s/clip  elapsed=3.0min  eta=0.6min
+[850/1000] ok=845 skip=5 fail=0  avg=0.21s/clip  elapsed=3.0min  eta=0.5min
+[875/1000] ok=870 skip=5 fail=0  avg=0.21s/clip  elapsed=3.1min  eta=0.4min
+[900/1000] ok=895 skip=5 fail=0  avg=0.21s/clip  elapsed=3.2min  eta=0.4min
+[925/1000] ok=920 skip=5 fail=0  avg=0.21s/clip  elapsed=3.3min  eta=0.3min
+[950/1000] ok=945 skip=5 fail=0  avg=0.21s/clip  elapsed=3.4min  eta=0.2min
+[975/1000] ok=970 skip=5 fail=0  avg=0.21s/clip  elapsed=3.5min  eta=0.1min
+[1000/1000] ok=995 skip=5 fail=0  avg=0.21s/clip  elapsed=3.6min  eta=0.0min
+
+Done. ok=995 skipped=5 failed=0 in 3.6min

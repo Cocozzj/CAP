@@ -1,0 +1,14 @@
+2026-05-04 22:11:57,039 [INFO] root: Found 1000 complete trajectories in outputs/data
+2026-05-04 22:11:57,057 [INFO] root: Wrote outputs/trajectories.json
+2026-05-04 22:11:57,057 [INFO] src.splitter: verb=close : train=100 val=12 test=13
+2026-05-04 22:11:57,057 [INFO] src.splitter: verb=fold : train=100 val=12 test=13
+2026-05-04 22:11:57,057 [INFO] src.splitter: verb=open : train=100 val=12 test=13
+2026-05-04 22:11:57,057 [INFO] src.splitter: verb=pour : train=100 val=12 test=13
+2026-05-04 22:11:57,057 [INFO] src.splitter: verb=pull : train=100 val=12 test=13
+2026-05-04 22:11:57,057 [INFO] src.splitter: verb=push : train=100 val=12 test=13
+2026-05-04 22:11:57,057 [INFO] src.splitter: verb=rotate : train=100 val=12 test=13
+2026-05-04 22:11:57,057 [INFO] src.splitter: verb=squeeze : train=100 val=12 test=13
+2026-05-04 22:11:57,057 [INFO] src.splitter: No-leakage check passed (1000 unique trajectory ids)
+2026-05-04 22:11:57,058 [INFO] src.splitter: Wrote splits to outputs/splits.json
+2026-05-04 22:11:57,123 [INFO] src.packager: Wrote manifest with 1000 entries to outputs/manifest.json
+Done.

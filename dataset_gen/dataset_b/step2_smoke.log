@@ -1,0 +1,4 @@
+2026-05-04 21:50:16,319 [INFO] root: Standardizing 5 clips with 4 workers
+[5/5] ok=5 skip=0 fail=0  avg=0.3s/clip  elapsed=0.0min  eta=0.0min
+
+Done. ok=5 skipped=0 failed=0 in 0.0min

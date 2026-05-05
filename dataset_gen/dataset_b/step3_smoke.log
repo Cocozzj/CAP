@@ -1,0 +1,17 @@
+2026-05-04 21:52:56,099 [INFO] root: Estimating depth for 5 trajectories on cuda
+2026-05-04 21:52:59,306 [INFO] src.depth_estimator: Loading DepthAnything-v2 (depth-anything/Depth-Anything-V2-Large-hf) on cuda
+2026-05-04 21:52:59,410 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/depth-anything/Depth-Anything-V2-Large-hf/resolve/main/processor_config.json "HTTP/1.1 404 Not Found"
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+2026-05-04 21:52:59,410 [WARNING] huggingface_hub.utils._http: Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+2026-05-04 21:52:59,497 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/depth-anything/Depth-Anything-V2-Large-hf/resolve/main/preprocessor_config.json "HTTP/1.1 307 Temporary Redirect"
+2026-05-04 21:52:59,608 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/depth-anything/Depth-Anything-V2-Large-hf/7581137eff8d4e94f6e796d3baea0e9fa79b22d2/preprocessor_config.json "HTTP/1.1 200 OK"
+2026-05-04 21:52:59,708 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/resolve-cache/models/depth-anything/Depth-Anything-V2-Large-hf/7581137eff8d4e94f6e796d3baea0e9fa79b22d2/preprocessor_config.json "HTTP/1.1 200 OK"
+2026-05-04 21:52:59,808 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/depth-anything/Depth-Anything-V2-Large-hf/resolve/main/processor_config.json "HTTP/1.1 404 Not Found"
+2026-05-04 21:52:59,891 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/depth-anything/Depth-Anything-V2-Large-hf/resolve/main/preprocessor_config.json "HTTP/1.1 307 Temporary Redirect"
+2026-05-04 21:52:59,929 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/depth-anything/Depth-Anything-V2-Large-hf/7581137eff8d4e94f6e796d3baea0e9fa79b22d2/preprocessor_config.json "HTTP/1.1 200 OK"
+2026-05-04 21:53:00,016 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/depth-anything/Depth-Anything-V2-Large-hf/resolve/main/config.json "HTTP/1.1 307 Temporary Redirect"
+2026-05-04 21:53:00,049 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/depth-anything/Depth-Anything-V2-Large-hf/7581137eff8d4e94f6e796d3baea0e9fa79b22d2/config.json "HTTP/1.1 200 OK"
+Loading weights:   0%|          | 0/503 [00:00<?, ?it/s]Loading weights:  84%|████████▍ | 425/503 [00:00<00:00, 4238.33it/s]Loading weights: 100%|██████████| 503/503 [00:00<00:00, 4218.87it/s]
+[5/5] ok=5 skip=0 fail=0  avg=1.27s/clip  elapsed=0.1min  eta=0.0min
+
+Done. ok=5 skipped=0 failed=0 in 0.1min

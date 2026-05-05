@@ -1,0 +1,61 @@
+# Dataset-B production config
+
+source:
+  ssv2:
+    enabled: true
+    root: "/home/zejun/CAP-A2GN/data_gen/raw_data/ssv2"   # the dir containing videos/ + labels/
+    videos_dir: "videos"                            # adjust if different (e.g. "20bn-something-something-v2")
+    labels_dir: "labels"                            # adjust if different (e.g. "annotations")
+    splits_used: ["train", "validation"]            # we sample from both; re-split later
+
+  mpii_cooking:
+    enabled: false
+    root: ""
+
+  kinect:
+    enabled: false
+    root: ""
+
+# What we want out of the curation step.
+# Per the spec: ~1000 clips, 8 verbs, mostly balanced.
+target_total: 1000
+target_per_verb: 125         # 125 * 8 = 1000
+min_target_per_verb: 50      # if a verb can't reach 125, accept >=50
+
+# Clip standardization
+clip:
+  image_size: 256             # native SSv2 is ~240p; we upsample to 256
+  fps: 12                     # SSv2 native fps; keep to avoid resample artifacts
+  min_frames: 30              # drop clips shorter than this (after trimming)
+  max_frames: 90              # cap longer clips at center; ensures dataloader can sample
+  pad_short_clips: true       # if a clip is < min_frames, hold last frame to reach min_frames
+
+# Depth estimation
+depth:
+  model: "depth_anything_v2"  # 'depth_anything_v2' | 'midas'
+  variant: "vitl"             # vitl / vitb / vits — vitl is most accurate
+  per_frame: false            # only first frame is needed for init_gs; full clip is for visualization / weak loss
+  estimate_first_frame_only: true
+
+# GS initialization from depth + RGB
+gs:
+  init_n_points: 10000        # match Dataset-A dataloader default
+  default_fovy_deg: 55.0      # SSv2 has no calibration; assume webcam-like 55° vertical FOV
+  depth_min_m: 0.1            # drop pixels with implausibly small estimated depth
+  depth_max_m: 10.0           # drop pixels far behind ("background sky" artifacts)
+  background_mask_quantile: 0.95  # treat top 5% of depth as background, drop them
+
+# Train/val/test split
+splits:
+  train_frac: 0.80
+  val_frac: 0.10
+  test_frac: 0.10
+  # Held-out object instances within Dataset-B don't make as much sense (real-world
+  # objects already vary widely); we use a simpler split here.
+  seed: 42
+
+# Runtime
+runtime:
+  seed: 42
+  num_workers: 8
+  device: "cuda"

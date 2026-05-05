@@ -1,0 +1,43 @@
+2026-05-04 21:50:17,014 [INFO] root: Standardizing 1000 clips with 8 workers
+[25/1000] ok=20 skip=5 fail=0  avg=0.2s/clip  elapsed=0.0min  eta=0.5min
+[50/1000] ok=45 skip=5 fail=0  avg=0.2s/clip  elapsed=0.0min  eta=0.5min
+[75/1000] ok=70 skip=5 fail=0  avg=0.3s/clip  elapsed=0.0min  eta=0.5min
+[100/1000] ok=95 skip=5 fail=0  avg=0.3s/clip  elapsed=0.1min  eta=0.5min
+[125/1000] ok=120 skip=5 fail=0  avg=0.3s/clip  elapsed=0.1min  eta=0.5min
+[150/1000] ok=145 skip=5 fail=0  avg=0.3s/clip  elapsed=0.1min  eta=0.5min
+[175/1000] ok=170 skip=5 fail=0  avg=0.3s/clip  elapsed=0.1min  eta=0.5min
+[200/1000] ok=195 skip=5 fail=0  avg=0.3s/clip  elapsed=0.1min  eta=0.5min
+[225/1000] ok=220 skip=5 fail=0  avg=0.3s/clip  elapsed=0.1min  eta=0.5min
+[250/1000] ok=245 skip=5 fail=0  avg=0.3s/clip  elapsed=0.1min  eta=0.4min
+[275/1000] ok=270 skip=5 fail=0  avg=0.3s/clip  elapsed=0.2min  eta=0.4min
+[300/1000] ok=295 skip=5 fail=0  avg=0.3s/clip  elapsed=0.2min  eta=0.4min
+[325/1000] ok=320 skip=5 fail=0  avg=0.3s/clip  elapsed=0.2min  eta=0.4min
+[350/1000] ok=345 skip=5 fail=0  avg=0.3s/clip  elapsed=0.2min  eta=0.4min
+[375/1000] ok=370 skip=5 fail=0  avg=0.3s/clip  elapsed=0.2min  eta=0.3min
+[400/1000] ok=395 skip=5 fail=0  avg=0.3s/clip  elapsed=0.2min  eta=0.3min
+[425/1000] ok=420 skip=5 fail=0  avg=0.3s/clip  elapsed=0.2min  eta=0.3min
+[450/1000] ok=445 skip=5 fail=0  avg=0.3s/clip  elapsed=0.3min  eta=0.3min
+[475/1000] ok=470 skip=5 fail=0  avg=0.3s/clip  elapsed=0.3min  eta=0.3min
+[500/1000] ok=495 skip=5 fail=0  avg=0.3s/clip  elapsed=0.3min  eta=0.3min
+[525/1000] ok=520 skip=5 fail=0  avg=0.3s/clip  elapsed=0.3min  eta=0.3min
+[550/1000] ok=545 skip=5 fail=0  avg=0.3s/clip  elapsed=0.3min  eta=0.3min
+[575/1000] ok=570 skip=5 fail=0  avg=0.3s/clip  elapsed=0.3min  eta=0.2min
+[600/1000] ok=595 skip=5 fail=0  avg=0.3s/clip  elapsed=0.3min  eta=0.2min
+[625/1000] ok=620 skip=5 fail=0  avg=0.3s/clip  elapsed=0.4min  eta=0.2min
+[650/1000] ok=645 skip=5 fail=0  avg=0.3s/clip  elapsed=0.4min  eta=0.2min
+[675/1000] ok=670 skip=5 fail=0  avg=0.2s/clip  elapsed=0.4min  eta=0.2min
+[700/1000] ok=695 skip=5 fail=0  avg=0.2s/clip  elapsed=0.4min  eta=0.2min
+[725/1000] ok=720 skip=5 fail=0  avg=0.2s/clip  elapsed=0.4min  eta=0.1min
+[750/1000] ok=745 skip=5 fail=0  avg=0.2s/clip  elapsed=0.4min  eta=0.1min
+[775/1000] ok=770 skip=5 fail=0  avg=0.3s/clip  elapsed=0.4min  eta=0.1min
+[800/1000] ok=795 skip=5 fail=0  avg=0.3s/clip  elapsed=0.4min  eta=0.1min
+[825/1000] ok=820 skip=5 fail=0  avg=0.3s/clip  elapsed=0.5min  eta=0.1min
+[850/1000] ok=845 skip=5 fail=0  avg=0.3s/clip  elapsed=0.5min  eta=0.1min
+[875/1000] ok=870 skip=5 fail=0  avg=0.3s/clip  elapsed=0.5min  eta=0.1min
+[900/1000] ok=895 skip=5 fail=0  avg=0.3s/clip  elapsed=0.5min  eta=0.1min
+[925/1000] ok=920 skip=5 fail=0  avg=0.3s/clip  elapsed=0.5min  eta=0.0min
+[950/1000] ok=945 skip=5 fail=0  avg=0.3s/clip  elapsed=0.5min  eta=0.0min
+[975/1000] ok=970 skip=5 fail=0  avg=0.3s/clip  elapsed=0.5min  eta=0.0min
+[1000/1000] ok=995 skip=5 fail=0  avg=0.3s/clip  elapsed=0.6min  eta=0.0min
+
+Done. ok=995 skipped=5 failed=0 in 0.6min

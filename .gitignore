@@ -7,3 +7,6 @@ __pycache__/
 /dataset/
 /dataset_gen/raw_data/
 /results/
+/runs/
+train.log
+train.pid

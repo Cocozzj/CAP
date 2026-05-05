@@ -1,0 +1,2 @@
+Python 3.10.12
+Cuda compilation tools, release 12.8, V12.8.93

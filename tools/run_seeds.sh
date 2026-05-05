@@ -44,9 +44,13 @@ EXTRA_ARGS="${EXTRA_ARGS:-}"
 # Multi-GPU: set TORCHRUN_NPROC=N to launch via torchrun on N local GPUs.
 # Multi-node: also set TORCHRUN_NNODES, TORCHRUN_NODE_RANK,
 #             TORCHRUN_RDZV_ENDPOINT (host:port of node 0).
+# Single-node port override: MASTER_PORT=NNNNN (default 29400).
 TORCHRUN_NPROC="${TORCHRUN_NPROC:-1}"
 if [[ "${TORCHRUN_NPROC}" -gt 1 ]]; then
     LAUNCH=("torchrun" "--nproc_per_node=${TORCHRUN_NPROC}")
+    if [[ -n "${MASTER_PORT:-}" ]]; then
+        LAUNCH+=("--master_port=${MASTER_PORT}")
+    fi
     if [[ -n "${TORCHRUN_NNODES:-}" ]]; then
         LAUNCH+=("--nnodes=${TORCHRUN_NNODES}"
                  "--node_rank=${TORCHRUN_NODE_RANK:-0}"

@@ -132,15 +132,20 @@ class ShapeMatchingPBD(DiffDeformer):
         # Add small ridge for numerical stability (avoid degenerate gradient)
         H_mat = H_mat + 1e-6 * torch.eye(3, device=dev, dtype=dtype).unsqueeze(0)
 
-        # SVD (cast to float32 under AMP for stability)
-        H_f32 = H_mat.float() if H_mat.dtype != torch.float32 else H_mat
-        U, S, Vt = torch.linalg.svd(H_f32)
+        # SVD + det + matmul ALL need fp32: under AMP, autocast would re-cast
+        # matmul outputs back to fp16 even after we cast SVD inputs to fp32,
+        # and torch.det → cuBLAS lu_factor has no Half kernel.  Force fp32
+        # for the entire shape-matching block.
+        with torch.amp.autocast(device_type=H_mat.device.type, enabled=False):
+            H_f32 = H_mat.float() if H_mat.dtype != torch.float32 else H_mat
+            U, S, Vt = torch.linalg.svd(H_f32)
 
-        # Ensure proper rotation (det = +1) via sign flip on last singular vector
-        det = torch.det(U @ Vt)
-        sign = torch.ones(M, 3, device=dev, dtype=H_f32.dtype)
-        sign[:, -1] = det.sign()
-        R_opt = (U * sign.unsqueeze(-2) @ Vt).to(dtype)                   # [M, 3, 3]
+            # Ensure proper rotation (det = +1) via sign flip on last singular vector
+            det = torch.det(U @ Vt)
+            sign = torch.ones(M, 3, device=dev, dtype=H_f32.dtype)
+            sign[:, -1] = det.sign()
+            R_opt_f32 = (U * sign.unsqueeze(-2)) @ Vt                     # [M, 3, 3] fp32
+        R_opt = R_opt_f32.to(dtype)
 
         # ── Goal positions: R* @ p + cm_cur ──────────────────────────
         goal = (R_opt[:, None] @ p.unsqueeze(-1)).squeeze(-1) + cm_cur    # [M, N, 3]

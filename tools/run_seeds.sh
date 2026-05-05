@@ -15,12 +15,38 @@
 #
 # Optional env vars:
 #   DATASET           a (default) | b
+#   STAGES_PRESET     a (default) | b — passed as --stages-preset
+#                     a → 4-stage 150ep curriculum (RIGID/PLANNER/PHYSICS/FULL)
+#                     b → single 30ep fine-tune stage (use with RESUME_TEMPLATE)
+#   LOSS_CONFIG       path to loss yaml (default: configs/loss.yaml; for B
+#                     fine-tune use configs/loss_b.yaml)
+#   RESUME_TEMPLATE   per-seed init weights template, with literal "{SEED}"
+#                     substituted per seed.  Example:
+#                       RESUME_TEMPLATE="runs/main_exp/seed_{SEED}/ckpt/main_exp_final.pt"
+#                     → seed 0 loads runs/main_exp/seed_0/ckpt/main_exp_final.pt
+#                     → seed 1 loads runs/main_exp/seed_1/ckpt/main_exp_final.pt
+#                     Used for B fine-tuning each seed from its corresponding
+#                     A pre-trained checkpoint.
+#   STAGE_DONE_FILE   filename to check for skip-if-finished (default
+#                     stage_full_done.pt for A; for B set to stage_finetune_b_done.pt)
 #   EXTRA_ARGS        forwarded verbatim to trainer (e.g. "--batch-size 16 --num-workers 8")
 #   TORCHRUN_NPROC    >1 → launch via torchrun for DDP
 #
 # Each seed gets its own subdirectory:  $BASE/seed_${SEED}/
 # Runs SEQUENTIALLY by default.  For parallel, drive from slurm/k8s with
 # one machine per seed.
+#
+# Examples:
+#   # Dataset-A 3-seed long training (default):
+#   MANIFEST=dataset/dataset_a/manifest.json DATA_DIR=dataset/dataset_a/data \
+#     TORCHRUN_NPROC=8 tools/run_seeds.sh runs/main_exp 0 1 2
+#
+#   # Dataset-B fine-tune from A's main_exp_final.pt:
+#   MANIFEST=dataset/dataset_b/manifest.json DATA_DIR=dataset/dataset_b/data \
+#     DATASET=b STAGES_PRESET=b LOSS_CONFIG=configs/loss_b.yaml \
+#     RESUME_TEMPLATE="runs/main_exp/seed_{SEED}/ckpt/main_exp_final.pt" \
+#     STAGE_DONE_FILE=stage_finetune_b_done.pt \
+#     TORCHRUN_NPROC=8 tools/run_seeds.sh runs/finetune_b 0 1 2
 # ─────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -40,6 +66,10 @@ fi
 
 # Anything in $EXTRA_ARGS is forwarded verbatim to trainer.
 EXTRA_ARGS="${EXTRA_ARGS:-}"
+STAGES_PRESET="${STAGES_PRESET:-a}"
+LOSS_CONFIG="${LOSS_CONFIG:-configs/loss.yaml}"
+RESUME_TEMPLATE="${RESUME_TEMPLATE:-}"
+STAGE_DONE_FILE="${STAGE_DONE_FILE:-stage_full_done.pt}"
 
 # Multi-GPU: set TORCHRUN_NPROC=N to launch via torchrun on N local GPUs.
 # Multi-node: also set TORCHRUN_NNODES, TORCHRUN_NODE_RANK,
@@ -62,29 +92,56 @@ else
 fi
 
 mkdir -p "${BASE}"
-echo "Base dir : ${BASE}"
-echo "Seeds    : ${SEEDS[*]}"
-echo "Extra    : ${EXTRA_ARGS:-<none>}"
+echo "Base dir       : ${BASE}"
+echo "Seeds          : ${SEEDS[*]}"
+echo "Dataset        : ${DATASET}  (preset: ${STAGES_PRESET})"
+echo "Loss config    : ${LOSS_CONFIG}"
+echo "Resume tmpl    : ${RESUME_TEMPLATE:-<none>}"
+echo "Skip-if-done   : ckpt/${STAGE_DONE_FILE}"
+echo "Extra          : ${EXTRA_ARGS:-<none>}"
 echo
 
 for SEED in "${SEEDS[@]}"; do
     OUT="${BASE}/seed_${SEED}"
-    if [[ -f "${OUT}/ckpt/stage_full_done.pt" ]]; then
-        echo "✓ seed=${SEED} already finished (stage_full_done.pt exists) — skipping"
+    if [[ -f "${OUT}/ckpt/${STAGE_DONE_FILE}" ]]; then
+        echo "✓ seed=${SEED} already finished (${STAGE_DONE_FILE} exists) — skipping"
         continue
     fi
     echo "─────────────────────────────────────────────────────────────"
     echo "▶ seed=${SEED}  →  ${OUT}"
+
+    # Per-seed init-weights checkpoint (only set if RESUME_TEMPLATE provided).
+    # Substitute literal "{SEED}" in the template with the current seed number.
+    RESUME_ARG=()
+    if [[ -n "${RESUME_TEMPLATE}" ]]; then
+        RESUME_CKPT="${RESUME_TEMPLATE//\{SEED\}/${SEED}}"
+        if [[ -f "${RESUME_CKPT}" ]]; then
+            RESUME_ARG=("--resume-from-ckpt" "${RESUME_CKPT}")
+            echo "  ⟳ init from: ${RESUME_CKPT}"
+        else
+            # Fail fast — silently training from scratch on a short B
+            # curriculum (30 epochs) would produce useless weights and waste
+            # GPU hours.  If the source ckpt is missing, the user needs to
+            # know NOW, not after the run finishes.
+            echo "  ✗ ERROR: RESUME_TEMPLATE set but ckpt missing: ${RESUME_CKPT}"
+            echo "    Either:"
+            echo "      (a) wait for source training (e.g. Dataset-A) to finish"
+            echo "      (b) unset RESUME_TEMPLATE if you really want from-scratch"
+            exit 1
+        fi
+    fi
     echo "─────────────────────────────────────────────────────────────"
 
     "${LAUNCH[@]}" -m train.trainer \
         --config configs/config.yaml \
-        --loss-config configs/loss.yaml \
+        --loss-config "${LOSS_CONFIG}" \
+        --stages-preset "${STAGES_PRESET}" \
         --out-dir "${OUT}" \
         --seed "${SEED}" \
         --dataset "${DATASET}" \
         --manifest "${MANIFEST}" \
         --data-dir "${DATA_DIR}" \
+        "${RESUME_ARG[@]}" \
         ${EXTRA_ARGS}
 done
 

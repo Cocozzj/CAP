@@ -1,0 +1,70 @@
+# ================================================================
+# Loss weights for Dataset-B fine-tuning.
+#
+# PDF "模型训练配置" §Dataset-B says:
+#   - 没有多视角监督，引入单目先验 (MiDaS) 作为 weak 监督
+#   - 物理一致性强化，利用合理性评估为主
+#   - 由于真实视频噪音，加大 InfoNCE 语义损失权重
+#   - 让模型更多依赖语义对齐和从 Dataset-A 训练的表征
+#
+# Concretely (relative to loss.yaml for Dataset-A):
+#   lambda_nce         0.1  → 0.3   (PDF: 加大 InfoNCE)
+#   lambda_depth       0.5  → 1.0   (PDF: MiDaS 是主 3D 监督, 替代多视角重投影)
+#   lambda_rec_lpips   0.1  → 0.3   (PDF: 视觉重建权重提升)
+#   lambda_physics     0.1  → 0.2   (PDF: 物理一致性强化)
+#   lambda_cvae_kl     anneal → fixed 0.1 (PDF: B 用 PDF 指定的固定 β)
+#
+# Structural losses (clos / inv / eq / comm / hier) inherit from A unchanged —
+# the algebraic structure is dataset-independent.
+# ================================================================
+loss:
+  # A. Algebraic structure — UNCHANGED from A
+  lambda_clos:            0.5
+  lambda_inv:             0.5
+  lambda_eq:              0.5
+  lambda_eq_cross:        0.5
+  lambda_comm:            0.01
+  lambda_comm_max:        0.1
+
+  # B. Reconstruction — boost LPIPS (no multi-view to anchor)
+  lambda_rec:             0.2
+  lambda_rec_mse:         0.2
+  lambda_rec_lpips:       0.3       # ← 0.1 → 0.3 (PDF)
+  lambda_depth:           1.0       # ← 0.5 → 1.0 (PDF: MiDaS 主 3D 监督)
+
+  # C. Semantic alignment — strengthened (real video is noisy)
+  lambda_nce:             0.3       # ← 0.1 → 0.3 (PDF)
+  nce_temperature:        0.07
+
+  # D. Quantization & planning — KL fixed β=0.1 per PDF
+  lambda_vq_act:          1.0
+  lambda_vq_task:         1.0
+  lambda_cvae_kl:         0.1       # ← was annealed 0.01→0.1; PDF B uses fixed
+  lambda_cvae_kl_max:     0.1
+  lambda_cvae_recon:      1.0
+  lambda_planner_ce:      1.0
+  lambda_hier:            0.2
+
+  # E. Regularization — physics strengthened
+  lambda_lip:             0.01
+  lip_target_C:           2.0
+  lip_epsilon:            0.01
+  lambda_entropy:         0.05
+  entropy_H_min:          3.0
+  entropy_H_max:          8.0
+  lambda_physics:         0.2       # ← 0.1 → 0.2 (PDF: 物理一致性强化)
+  lambda_physics_vol:     0.5
+  lambda_physics_contact: 1.0
+  lambda_physics_energy:  1.0
+  physics_contact_d_min:  0.01
+
+
+# ================================================================
+# Training (B fine-tune): single stage, no stage anneal needed
+# ================================================================
+training:
+  # Tau anneal stays the same — short fine-tune still benefits from low τ
+  tau_schedule:
+    start: 0.3       # B starts where A's tau ended (lower than A's 1.0 init)
+    end:   0.1
+    anneal_epochs: 30

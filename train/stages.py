@@ -136,4 +136,61 @@ SMOKE_STAGES: List[StageSpec] = [
 ]
 
 
-__all__ = ["StageSpec", "DEFAULT_STAGES", "SMOKE_STAGES"]
+# ══════════════════════════════════════════════════════════════════════
+# Dataset-B fine-tune: SINGLE stage, full model trainable, low lr.
+# ══════════════════════════════════════════════════════════════════════
+# PDF §"模型训练配置" recommends:
+#   - "预训练 + 微调" — Dataset-A first for structure / geometry init,
+#     then Dataset-B fine-tune for real-world appearance adaptation.
+#   - All forward paths active (planner, physics, etc.).
+#   - Strengthen InfoNCE / depth / lpips / physics weights (see loss_b.yaml).
+#
+# Why no curriculum?  A's 4-stage curriculum is for cold-start to set up
+# disentangled representations.  B inherits those (via --resume-from-ckpt
+# loading main_exp_final.pt) and just needs to adapt to noisier real video
+# without forgetting.  Single stage with low lr keeps changes incremental.
+DATASET_B_STAGES: List[StageSpec] = [
+    StageSpec(
+        name="FINETUNE_B", epochs=30, lr=3e-5,           # PDF "微调" → low lr
+        encoder=True, planner=True, executor=True, deform_only=False,
+        enable_physics=True,
+        run_planner=True,
+        # Match A's FULL stage scheduled-sampling, but no ramp (start fully on)
+        sample_prob_max=0.5,
+        sample_prob_ramp_epochs=0,                       # already trained on A → no ramp
+        render_n_timesteps=5,
+        loss=LossSpec(
+            enable_physics=True,
+            enable_lipschitz=True,
+            enable_physics_loss=True,
+            enable_equiv=True,
+            enable_hier=True,
+            enable_entropy=True,
+            # CVAE KL fixed β=0.1 in B (loss_b.yaml sets the value;
+            # this disables the anneal so β doesn't ramp again).
+            anneal_cvae_kl=False,
+            anneal_comm=False,
+        ),
+    ),
+]
+
+
+# SMOKE for B: 1 epoch, all loss flags identical to FINETUNE_B.
+SMOKE_STAGES_B: List[StageSpec] = [
+    StageSpec(name=s.name, epochs=1, lr=s.lr,
+              encoder=s.encoder, planner=s.planner, executor=s.executor,
+              deform_only=s.deform_only, enable_physics=s.enable_physics,
+              run_planner=s.run_planner,
+              sample_prob_max=s.sample_prob_max,
+              sample_prob_ramp_epochs=s.sample_prob_ramp_epochs,
+              render_n_timesteps=s.render_n_timesteps,
+              loss=copy.deepcopy(s.loss))
+    for s in DATASET_B_STAGES
+]
+
+
+__all__ = [
+    "StageSpec",
+    "DEFAULT_STAGES", "SMOKE_STAGES",
+    "DATASET_B_STAGES", "SMOKE_STAGES_B",
+]

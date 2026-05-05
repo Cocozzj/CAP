@@ -99,7 +99,9 @@ import yaml
 
 from model import CAPModel, CAPLoss
 from dataload import DatasetA, DatasetB, collate_batch
-from .stages import StageSpec, DEFAULT_STAGES, SMOKE_STAGES
+from .stages import (
+    StageSpec, DEFAULT_STAGES, SMOKE_STAGES, DATASET_B_STAGES, SMOKE_STAGES_B,
+)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -787,7 +789,15 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--grad-clip",   type=float, default=1.0)
     p.add_argument("--save-every",  type=int, default=5)
     p.add_argument("--keep-last",   type=int, default=3)
-    p.add_argument("--resume",      type=str, default=None)
+    p.add_argument("--resume",      type=str, default=None,
+                   help="resume training from this ckpt (model + optim + scaler + epoch); "
+                        "use for crash recovery within the SAME curriculum")
+    p.add_argument("--resume-from-ckpt", type=str, default=None,
+                   help="load model weights from this ckpt as initialization, "
+                        "but start training from epoch 0 with fresh optimizer. "
+                        "Use for B fine-tuning from A's main_exp_final.pt — different "
+                        "from --resume which preserves optimizer state and continues "
+                        "the same training run")
     # Dataset
     p.add_argument("--dataset",       type=str, default="a", choices=["a", "b"],
                    help="a = DatasetA (3-cam synthetic), b = DatasetB (1-cam real video)")
@@ -811,6 +821,10 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--deterministic", action="store_true")
     p.add_argument("--smoke",         action="store_true",
                    help="1 epoch / stage, same lr — local pipeline test")
+    p.add_argument("--stages-preset", type=str, default="a",
+                   choices=["a", "b"],
+                   help="a = DEFAULT_STAGES (4-stage curriculum, 150ep, for Dataset-A), "
+                        "b = DATASET_B_STAGES (single 30ep stage, for B fine-tune from A)")
     return p.parse_args()
 
 
@@ -1021,13 +1035,60 @@ def main():
     cfg, loss_cfg = _load_configs(args)
     _check_renderer_sanity(loss_cfg, is_main_proc)
     out_dir, ckpt_dir, log_dir = _setup_run_dirs(args, is_main_proc)
+    # ── Mutex check: --resume vs --resume-from-ckpt ──
+    # These two flags do different things and combining them is ambiguous:
+    #   --resume:           full training state (model+optim+scaler+epoch),
+    #                       continues the SAME run after a crash
+    #   --resume-from-ckpt: model weights only, fresh optim/epoch=0,
+    #                       used to BOOTSTRAP a NEW run from a pre-trained ckpt
+    # If both were set, the second `_resolve_resume` call (--resume) would
+    # silently overwrite the weights from --resume-from-ckpt — confusing.
+    if args.resume and args.resume_from_ckpt:
+        raise SystemExit(
+            "Error: --resume and --resume-from-ckpt are mutually exclusive.\n"
+            "  Use --resume to continue a crashed run (preserves optimizer state).\n"
+            "  Use --resume-from-ckpt to start a NEW run from pre-trained weights\n"
+            "  (e.g. B fine-tune from A's main_exp_final.pt)."
+        )
+
     base_model, loss_fn, loader, sampler, val_loader, val_sampler = _build_model_and_data(
         args, cfg, loss_cfg, is_ddp, rank, device, is_main_proc,
     )
 
-    stage_schedule = SMOKE_STAGES if args.smoke else DEFAULT_STAGES
-    if args.smoke and is_main_proc:
-        print("⚡ SMOKE mode: 1 epoch per stage")
+    # ── Initialize from a Dataset-A checkpoint (B fine-tune entry point) ──
+    # --resume-from-ckpt loads ONLY model weights (no optim / no scaler / no
+    # epoch counter), so training starts fresh on the new dataset / curriculum.
+    # Different from --resume, which preserves the full training state.
+    if args.resume_from_ckpt:
+        ckpt_path = Path(args.resume_from_ckpt)
+        if not ckpt_path.is_file():
+            raise FileNotFoundError(f"--resume-from-ckpt: {ckpt_path} not found")
+        if is_main_proc:
+            print(f"⏬ loading init weights: {ckpt_path}")
+        state = torch.load(ckpt_path, map_location=str(device))
+        msg = base_model.load_state_dict(state["model"], strict=False)
+        if is_main_proc:
+            print(f"  loaded — missing: {len(msg.missing_keys)}  "
+                  f"unexpected: {len(msg.unexpected_keys)}")
+            if msg.missing_keys:
+                print(f"  first 5 missing: {msg.missing_keys[:5]}")
+            if msg.unexpected_keys:
+                print(f"  first 5 unexpected: {msg.unexpected_keys[:5]}")
+
+    # ── Choose curriculum: A's 4-stage default vs B's single fine-tune stage ──
+    # SMOKE flag works orthogonally — it produces a 1-epoch-per-stage variant
+    # of WHICHEVER preset was selected (so `--smoke --stages-preset b` runs
+    # the B curriculum's 1-epoch SMOKE, not A's).
+    if args.stages_preset == "b":
+        stage_schedule = SMOKE_STAGES_B if args.smoke else DATASET_B_STAGES
+        if is_main_proc:
+            mode = "⚡ SMOKE" if args.smoke else "📦 Dataset-B fine-tune"
+            print(f"{mode}: {len(stage_schedule)} stage(s), "
+                  f"{sum(s.epochs for s in stage_schedule)} total epochs")
+    else:
+        stage_schedule = SMOKE_STAGES if args.smoke else DEFAULT_STAGES
+        if args.smoke and is_main_proc:
+            print("⚡ SMOKE mode: 1 epoch per stage")
 
     # P2-5: Gumbel-softmax temperature anneal config (yaml: training.tau_schedule)
     tau_schedule = (loss_cfg.get("training", {}) or {}).get("tau_schedule")

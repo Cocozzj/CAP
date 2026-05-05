@@ -517,13 +517,20 @@ def _prepare_stage(
         executor=spec.executor, deform_only=spec.deform_only,
     )
 
-    # Wrap with DDP iff distributed.  Stages that freeze submodules need
-    # find_unused_parameters; FULL stage doesn't.
+    # Wrap with DDP iff distributed.
+    # ALWAYS set find_unused_parameters=True — even FULL stage (everything
+    # trainable) has conditional forward paths that don't backprop through
+    # every parameter on every batch:
+    #   - lipschitz_loss / closure_loss perturb input and re-apply token,
+    #     toggling enable_physics in a way that bypasses some physics params
+    #   - run_planner conditionally skips Planner forward
+    #   - some loss components are gated (enable_equiv, enable_physics_loss)
+    # Without find_unused=True, DDP raises "Expected to have finished
+    # reduction in the prior iteration" mid-FULL-stage.  Cost: ~5-10%
+    # backward overhead — acceptable for the robustness it buys.
     if is_ddp:
-        any_frozen = (not spec.encoder) or (not spec.planner) or \
-                     (not spec.executor) or spec.deform_only
         model = DDP(base_model, device_ids=[local_rank],
-                    find_unused_parameters=any_frozen)
+                    find_unused_parameters=True)
     else:
         model = base_model
 
@@ -552,7 +559,7 @@ def _prepare_stage(
         print(f"\n=== Stage {spec.name} ===")
         print(f"  epochs={spec.epochs}, lr={spec.lr}, "
               f"physics={spec.enable_physics}, trainable={n_train:,}"
-              + (f"  [DDP find_unused={any_frozen}]" if is_ddp else ""))
+              + ("  [DDP find_unused=True]" if is_ddp else ""))
 
     return model, optimizer, scaler, writer
 

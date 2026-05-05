@@ -633,29 +633,31 @@ def run_stage(
                 prune_checkpoints(ckpt_dir, keep_last=keep_last)
                 print(f"  ✔ saved {p.name}")
 
-        # ── Validation pass (main rank only; others wait at barrier) ──
-        if val_loader is not None and ((epoch + 1) % val_every == 0):
-            if is_main_proc:
-                stage_step = global_step - stage_start_global_step
-                val_loss = run_val(
-                    base_model, val_loader, loss_fn, spec, device,
-                    stage_step=stage_step, total_iters=total_iters,
+        # ── Validation pass: rank 0 has val_loader, ranks 1-7 have None ──
+        # The barrier MUST be unconditional (every rank reaches it every
+        # epoch), otherwise rank 0 deadlocks alone while others race ahead.
+        should_val = ((epoch + 1) % val_every == 0)
+        if is_main_proc and val_loader is not None and should_val:
+            stage_step = global_step - stage_start_global_step
+            val_loss = run_val(
+                base_model, val_loader, loss_fn, spec, device,
+                stage_step=stage_step, total_iters=total_iters,
+            )
+            print(f"  val_loss={val_loss:.4f}  (best={min(best_val, val_loss):.4f})",
+                  flush=True)
+            if writer is not None:
+                writer.add_scalar("val/total", val_loss, global_step)
+            if val_loss < best_val:
+                best_val = val_loss
+                save_checkpoint(
+                    best_val_path, model, optimizer, scaler,
+                    stage_name=spec.name, epoch=epoch + 1,
+                    global_step=global_step,
+                    extra={"val_loss": val_loss, "best_val": True},
                 )
-                print(f"  val_loss={val_loss:.4f}  (best={min(best_val, val_loss):.4f})",
-                      flush=True)
-                if writer is not None:
-                    writer.add_scalar("val/total", val_loss, global_step)
-                if val_loss < best_val:
-                    best_val = val_loss
-                    save_checkpoint(
-                        best_val_path, model, optimizer, scaler,
-                        stage_name=spec.name, epoch=epoch + 1,
-                        global_step=global_step,
-                        extra={"val_loss": val_loss, "best_val": True},
-                    )
-                    print(f"  ✨ new best → {best_val_path.name}")
-            if is_ddp:
-                dist.barrier()   # other ranks wait until main rank finishes val
+                print(f"  ✨ new best → {best_val_path.name}")
+        if is_ddp and should_val:
+            dist.barrier()   # all ranks sync; non-main ranks pass through immediately
 
     if is_main_proc:
         p = ckpt_dir / f"stage_{spec.name.lower()}_done.pt"
@@ -697,28 +699,37 @@ def build_dataset(args, sh_dim: int, *, split: Optional[str] = None):
 
 
 def _build_val_loader(args, sh_dim: int, is_main_proc: bool) -> Optional[DataLoader]:
-    """Build val DataLoader.  Only main rank uses it (others wait at barrier),
-    so no DistributedSampler — main rank sees the full val set.
+    """Build val DataLoader on rank 0 only — other ranks return None and skip
+    the val block entirely (see run_stage).
 
-    Returns None if ``--no-val`` or if the val split doesn't exist.
+    KEY FIX: val_loader uses ``num_workers=0`` to load batches directly in the
+    main process instead of fork()-ing worker subprocesses.  Without this, rank
+    0 hangs in ``do_wait`` waiting for dataloader children to spawn at the
+    first val iteration, while ranks 1-7 spin at NCCL barrier (100% util,
+    waiting for rank 0 to reach the same barrier).  The val set is small (~180
+    samples) and inference is fast, so single-process loading costs ~10s — far
+    less than the broken multi-worker path's deadlock.
+
+    Returns None if ``--no-val``, if the val split doesn't exist, or if this
+    is not the main rank.
     """
     if args.no_val:
+        return None
+    # Only rank 0 builds the val loader.  Other ranks pass through the val
+    # block in run_stage without doing anything (val_loader is None for them).
+    if not is_main_proc:
         return None
     try:
         ds = build_dataset(args, sh_dim=sh_dim, split=args.val_split)
     except (ValueError, SystemExit) as e:
-        if is_main_proc:
-            print(f"⚠ val split {args.val_split!r} unavailable ({e}) — best-val tracking disabled")
+        print(f"⚠ val split {args.val_split!r} unavailable ({e}) — best-val tracking disabled")
         return None
-    if is_main_proc:
-        print(f"Val:     {args.val_split!r}  ({len(ds)} samples)")
+    print(f"Val:     {args.val_split!r}  ({len(ds)} samples)")
     return DataLoader(
         ds, batch_size=args.batch_size, shuffle=False, sampler=None,
-        num_workers=args.num_workers, collate_fn=collate_batch,
+        num_workers=0,  # CRITICAL: 0 → no worker fork → no do_wait deadlock
+        collate_fn=collate_batch,
         pin_memory=True, drop_last=False,
-        # Keep val workers alive across epochs (val runs every epoch by default)
-        persistent_workers=(args.num_workers > 0),
-        prefetch_factor=2,
     )
 
 

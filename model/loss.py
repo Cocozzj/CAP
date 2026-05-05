@@ -119,6 +119,11 @@ def scene_distance(state_a: SceneState, state_b: SceneState) -> torch.Tensor:
     Returns: scalar (averaged over [B, K, N_real])
     """
     diff = (state_a.mu - state_b.mu).norm(dim=-1)            # [B, K, N]
+    # Defensive: even with masked_mean now NaN-safe (model/utils.py),
+    # an entire batch/slot row of NaN would still produce NaN.  Replace
+    # any residual NaN with a large but finite penalty so training fights
+    # them down via gradient instead of locking up.
+    diff = torch.nan_to_num(diff, nan=10.0, posinf=10.0, neginf=10.0)
     if state_a.mask is not None:
         return masked_mean(diff, state_a.mask, dim=-1).mean()
     return diff.mean()

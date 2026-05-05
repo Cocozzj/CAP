@@ -189,7 +189,11 @@ def masked_mean(
     # n_valid currently lives in mask's dim space; expand to x's dim space
     while n_valid.dim() < (x.dim() if keepdim else x.dim() - 1):
         n_valid = n_valid.unsqueeze(-1)
-    return (x * m).sum(dim=dim, keepdim=keepdim) / n_valid
+    # NaN-SAFE: ``x * m`` would propagate NaN from masked-out positions
+    # (IEEE 754: NaN * 0 = NaN), poisoning the mean.  Use torch.where to
+    # actually replace masked-out positions with 0 before summing.
+    x_masked = torch.where(m.bool(), x, torch.zeros_like(x))
+    return x_masked.sum(dim=dim, keepdim=keepdim) / n_valid
 
 
 # ═══════════════════════════════════════════════════════════════════════════

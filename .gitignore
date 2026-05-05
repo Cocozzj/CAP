@@ -6,3 +6,4 @@ __pycache__/
 .venv/
 /dataset/
 /dataset_gen/raw_data/
+/results/

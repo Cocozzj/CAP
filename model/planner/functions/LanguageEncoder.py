@@ -43,7 +43,12 @@ class _TextEncoder(nn.Module):
         if self.enc_type == "sentencetransformer":
             self.pretrained_name = "all-mpnet-base-v2"
             self.model = SentenceTransformer(self.pretrained_name)
-            self.out_dim = int(self.model.get_sentence_embedding_dimension())
+            # New API name (sentence-transformers >=3.0).  Fall back to the
+            # legacy method on older versions to keep this file portable.
+            if hasattr(self.model, "get_embedding_dimension"):
+                self.out_dim = int(self.model.get_embedding_dimension())
+            else:
+                self.out_dim = int(self.model.get_sentence_embedding_dimension())
             self._use_clip_model = False
 
         elif self.enc_type == "clip":

@@ -46,11 +46,14 @@ loss:
   lambda_hier:            0.2
 
   # E. Regularization — physics strengthened
-  # NB: lambda_lip lowered from A's 0.01 → 0.005 because B starts from an
-  # already-stable vfield (resumed from main_exp_final.pt), so the strong
-  # spectral-norm pull is unnecessary and risks blowing up under SSv2's
-  # distribution shift in the first few iterations.
-  lambda_lip:             0.005
+  # NB: ORIGINALLY tried lowering lambda_lip 0.01 → 0.005 (theory: A's
+  # vfield was already stable so weaker pull is fine).  Mini-run TB showed
+  # this was wrong — under SSv2 distribution shift L_Lip jumped to ~7000
+  # (vs ~242 in A) and stayed there because the 0.005 weight wasn't strong
+  # enough to pull it back.  Restoring 0.01 (= A's value) so spectral-norm
+  # regularisation can actually do its job.  If 0.01 still doesn't drag
+  # L_Lip down within 5 epochs, raise to 0.02.
+  lambda_lip:             0.01
   lip_target_C:           2.0
   lip_epsilon:            0.01
   lambda_entropy:         0.05

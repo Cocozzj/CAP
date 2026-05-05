@@ -143,16 +143,28 @@ def _ensure_R3x3(rot: torch.Tensor) -> torch.Tensor:
 def _invert_params(p: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
     """Construct SE(3)-inverse of an action token's physical_params.
 
-    Forward (per RigidTransform): R = exp(ξ) · R_h ; μ' = μRᵀ + ℓ.
-    Inverse:  R⁻¹ = R_hᵀ · exp(−ξ) ; ℓ⁻¹ = −ℓ · R   (row-vec convention).
+    Forward (per RigidTransform.transform.py): R = exp(ξ) · R_h, μ' = μ Rᵀ + ℓ
+                                              (row-vector convention)
 
-    Since RigidTransform always computes R = exp(ξ') · R_h', we encode the
-    inverse as:
-        R_h'  = R_hᵀ                           (transpose)
-        ξ'    = −R_h ξ                          (adjoint conjugate)
-        ⇒   exp(ξ') · R_h' = R_hᵀ · exp(−ξ) = R⁻¹
-        ℓ'    = −ℓ · R                          (computed from ORIGINAL R)
-        ρ'    = −ρ                              (linear deformation reversal)
+    Inverse must satisfy:  exp(ξ_inv) · R_h_inv = R⁻¹ = R_hᵀ · exp(−ξ)
+
+    Decomposition:
+        R_h_inv = R_hᵀ                          (transpose)
+        exp(ξ_inv) = R_hᵀ · exp(−ξ) · R_h
+                   = exp(skew(R_hᵀ · (−ξ)))     (SO(3) conjugation identity)
+        ⇒ ξ_inv = −R_hᵀ · ξ                     ← NOT −R_h · ξ (was a bug)
+
+    Translation in row-vec form:  μ = (μ' − ℓ) R = μ' R − ℓ R
+        ⇒ ℓ_inv = −ℓ · R                        (computed from ORIGINAL R)
+
+    For the deformation slot ρ (9-d named physics tuple — Physics-Plugin PDF
+    §1.3): there is NO group-theoretic "inverse" of (E, ν, ρ_m, F, μ, damping,
+    dt) — these are physical parameters, not group elements.  We approximate
+    by negating the FORCE component only (the only additive-composable slot)
+    and zeroing the others, so applying g then g_inv cancels the *force* but
+    leaves material/contact unchanged — a partial round-trip that's better
+    than naively negating all 9 dims (which previously inverted Young's
+    modulus etc., which is physically meaningless).
     """
     R_h     = _ensure_R3x3(p["rotation"])                    # [B, K, 3, 3]
     xi      = p["micro_rotation"]                            # [B, K, 3]
@@ -160,21 +172,28 @@ def _invert_params(p: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
     rho     = p.get("deformation", None)
 
     R_h_inv = R_h.transpose(-2, -1)                          # [B, K, 3, 3]
-    # Adjoint conjugate of ξ
-    xi_inv  = -torch.einsum("...ij,...j->...i", R_h, xi)     # [B, K, 3]
 
-    # Forward total rotation R for translation inverse
-    # NOTE: avoid importing exp_so3 here to keep loss.py independent;
-    # we approximate ξ small (≤5°) → exp(ξ) ≈ I + skew(ξ).  For the inverse
-    # algebraic loss this small-angle approximation suffices.
-    R_total = R_h.clone()                                    # [B, K, 3, 3]  approximation
+    # Adjoint conjugate of ξ:  ξ_inv = −R_hᵀ · ξ
+    # einsum "...ji,...j->...i" computes (R_hᵀ ξ)_i = R_h_ji · ξ_j ✓
+    xi_inv  = -torch.einsum("...ji,...j->...i", R_h, xi)     # [B, K, 3]
+
+    # Translation inverse:  ℓ_inv = −ℓ · R  ≈  −ℓ · R_h  (small ξ ≤ 5° approx)
+    R_total = R_h.clone()
     l_inv   = -torch.einsum("...i,...ij->...j", l, R_total)
+
+    # Deformation: only invert the additive force slot (indices 3:6).
+    # E / ν / ρ_m / μ / damping / dt do NOT have group inverses.
+    rho_inv = None
+    if rho is not None:
+        rho_inv = rho.clone()
+        rho_inv[..., 3:6] = -rho[..., 3:6]                   # force ↦ -force
+        # other slots stay equal so material/contact "cancel" trivially
 
     inv = {
         "translation":    l_inv,
         "rotation":       R_h_inv.reshape(*R_h_inv.shape[:-2], 9),
         "micro_rotation": xi_inv,
-        "deformation":    (-rho if rho is not None else None),
+        "deformation":    rho_inv,
     }
     return inv
 
@@ -207,11 +226,28 @@ def closure_loss(
     enable_physics: bool = False,
     task_context: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    """L_clos = d_M( E(g_a) ∘ E(g_b),  E(g_a ⊙̂ g_b) ).
+    """L_clos = d_M( E(g_b) ∘ E(g_a),  E(g_a ⊙̂ g_b) ).
 
-    Closure under sequential composition.  We approximate the algebraic
-    composition in the physical-parameter space (additive in (ℓ, ξ) and
-    multiplicative in R_h), then compare to the sequential trajectory.
+    Closure under sequential composition.  Apply g_a then g_b to the scene,
+    and compare to applying the algebraically-composed action g_comp once.
+
+    Composition rule (row-vector convention used by RigidTransform: μ' = μ Rᵀ + ℓ):
+        After g_a:    μ → μ R_aᵀ + ℓ_a
+        After g_b:    μ → μ R_aᵀ R_bᵀ + ℓ_a R_bᵀ + ℓ_b
+                      = μ (R_b R_a)ᵀ + ℓ_a R_bᵀ + ℓ_b
+
+    So:
+        R_comp = R_b · R_a       (NOT R_a · R_b — that was a column-vec bug)
+        ℓ_comp = ℓ_a · R_bᵀ + ℓ_b
+
+    For micro-rotation ξ ≤ 5° we use the small-angle approximation
+    ξ_comp ≈ ξ_a + ξ_b (BCH error  O(‖ξ_a × ξ_b‖) ~ 0.4° per step — acceptable).
+
+    For ρ (9-d named physics tuple, Physics-Plugin PDF §1.3): physical
+    parameters do NOT have a group-composition rule (you can't "compose"
+    Young's moduli or densities).  We pass ρ_a (just the first action's
+    physics) so g_comp still triggers the deform branch — the closure check
+    reduces to the SE(3) part, which is what algebraic structure is about.
     """
     T = next(v.shape[1] for v in physical_params_seq.values() if v is not None)
     if T < 2:
@@ -221,24 +257,26 @@ def closure_loss(
     g_a = _slice_params(physical_params_seq, t)
     g_b = _slice_params(physical_params_seq, t + 1)
 
-    # Sequential path: E(g_a) ∘ E(g_b)
-    s1   = _apply_token_safe(executor, scene, g_a, enable_physics, task_context)
-    s_seq = _apply_token_safe(executor, s1,   g_b, enable_physics, task_context)
+    # Sequential path: apply g_a first, then g_b
+    s1    = _apply_token_safe(executor, scene, g_a, enable_physics, task_context)
+    s_seq = _apply_token_safe(executor, s1,    g_b, enable_physics, task_context)
 
-    # Composed path: g_comp = (ℓ_a + R_a·ℓ_b,  R_a·R_b,  ξ_a + ξ_b,  ρ_a + ρ_b)
+    # Composed path — algebraically combine in row-vec convention
     R_a = _ensure_R3x3(g_a["rotation"])
     R_b = _ensure_R3x3(g_b["rotation"])
-    R_comp = R_a @ R_b
-    l_comp = g_a["translation"] + torch.einsum("...ij,...j->...i", R_a, g_b["translation"])
-    xi_comp = g_a["micro_rotation"] + g_b["micro_rotation"]
-    rho_comp = None
-    if g_a.get("deformation") is not None and g_b.get("deformation") is not None:
-        rho_comp = g_a["deformation"] + g_b["deformation"]
+    R_comp = torch.einsum("...ij,...jk->...ik", R_b, R_a)            # R_b @ R_a
+    # ℓ_comp = ℓ_a · R_bᵀ + ℓ_b  ⇔  einsum("...i,...ji->...j", ℓ_a, R_b)
+    l_comp = (torch.einsum("...i,...ji->...j", g_a["translation"], R_b)
+              + g_b["translation"])
+    xi_comp = g_a["micro_rotation"] + g_b["micro_rotation"]          # small-angle BCH approx
     g_comp = {
         "translation":    l_comp,
         "rotation":       R_comp.reshape(*R_comp.shape[:-2], 9),
         "micro_rotation": xi_comp,
-        "deformation":    rho_comp,
+        # ρ does NOT compose group-theoretically — pass ρ_a so the deform
+        # branch fires once with comparable physics, but closure is really
+        # only checking the SE(3) algebraic structure here.
+        "deformation":    g_a.get("deformation"),
     }
     s_comp = _apply_token_safe(executor, scene, g_comp, enable_physics, task_context)
 
@@ -283,13 +321,27 @@ def equivariance_loss(
     enable_physics: bool = False,
     task_context: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    """Canonical-frame equivariance: actions executed in canonical space
-    should agree with actions executed in world space (modulo Φ_o conjugation).
+    """Φ-PERTURBATION STABILITY (NOT the strict PDF L_eq formula).
 
-    Since Executor already does world → canonical → exec → world internally,
-    this loss tests consistency by perturbing scene.phi and comparing outputs.
-    For training-time efficiency, we approximate by checking idempotence under
-    small Φ rotations (full Prop-3 conjugation handled by L_eq_cross below).
+    PDF Physics-Plugin §1.4 defines equivariance as conjugation:
+        Φ_o⁻¹ ∘ E_o(g) ∘ Φ_o ≈ E_c(g)
+    i.e. executing g in object frame vs canonical frame should agree modulo
+    the Φ_o coordinate change.
+
+    Implementing that strictly requires Executor to expose a "force-execute-
+    in-canonical" entry point separate from its current world→can→exec→world
+    pipeline.  Until that refactor lands, this loss approximates by:
+      1. Run E(g) on the original scene → s_orig
+      2. Perturb scene.phi.R_w2c by ~3° random rotation
+      3. Run E(g) on the perturbed scene → s_pert
+      4. L = d_M(s_orig, s_pert)
+
+    What this trains: E should be CONTINUOUSLY DEPENDENT on Φ — small Φ
+    perturbations produce small output changes.  This is a *necessary*
+    condition for true conjugation equivariance but not *sufficient*.
+
+    Strict cross-object equivariance (PDF §4.1 Prop 3) is handled by
+    ``equivariance_cross_object_loss`` which uses ``executor.transfer_object``.
     """
     T = next(v.shape[1] for v in physical_params_seq.values() if v is not None)
     t = int(torch.randint(0, T, (1,)).item())
@@ -384,12 +436,28 @@ def commutator_loss(
     enable_physics: bool = False,
     task_context: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    """Two non-overlapping micro-actions on different objects should commute.
+    """ANY-PAIR COMMUTATIVITY PENALTY (weaker than PDF "对易子探针").
 
-    L_comm = d_M( E(g_a) ∘ E(g_b),  E(g_b) ∘ E(g_a) )
+        L_comm = d_M( E(g_a) ∘ E(g_b),  E(g_b) ∘ E(g_a) )
 
-    For simplicity we compare full-token sequential applications (relying on
-    the algebraic structure of the codebook).  Theorem 3 bounds the gap.
+    PDF Physics-Plugin §1.4 specifies the commutator probe should target
+    operations that "本应交换/抵消" (should commute or cancel) — typically
+    actions on disjoint object slots, or an action paired with its partial
+    inverse.  The strict probe should:
+      - pick K_a ≠ K_b slot indices and apply g_a only on K_a, g_b only on K_b
+      - then E(g_a)∘E(g_b) and E(g_b)∘E(g_a) are mathematically required to
+        agree because the actions act on disjoint Gaussians
+
+    This implementation instead takes ANY two consecutive timestep actions
+    and applies them to ALL slots — so it penalises NON-commutativity even
+    when non-commutativity is the correct behaviour (e.g. rotate-then-translate
+    vs translate-then-rotate on the same object).
+
+    Effect: acts as a soft prior pushing the codebook toward more
+    commutative-like actions.  Useful as a low-weight regulariser
+    (lambda_comm anneals 0.01→0.1) but NOT a strict commutator probe.
+    Upgrade to true cross-slot probe when ``executor.apply_token`` gains a
+    per-slot mask argument.
     """
     T = next(v.shape[1] for v in physical_params_seq.values() if v is not None)
     if T < 2:
@@ -567,17 +635,41 @@ def hierarchical_loss(
     task_emb:   torch.Tensor,                      # [B, task_dim]
     sampling_cfg: Optional[Dict[str, Any]] = None,
 ) -> torch.Tensor:
-    """L_hier: parse generated atomic seq back to a task token, compare to
-    the original.  Active in Stage-2.
+    """L_hier — ONE-SIDED round-trip consistency (anchors TaskTokenizer + codebook
+    to whatever the AR decoder currently emits).  Active in Stage-2 / FULL.
 
-    Implementation: feed task_emb through the AR decoder, get generated
-    sequence, then pass that sequence through TaskTokenizer to recover
-    a task embedding, and compare cosine distance to the input task_emb.
+    Pipeline::
+
+        task_emb  ─┬→ build_cond_mem ─→ AR.decode_generate ─→ seq[B,L]  (no_grad)
+                   │                                              │
+                   │                                              ▼
+                   │                       F.embedding(seq, codebook.weight)
+                   │                                              │
+                   │                                              ▼
+                   └→ ──── compare ←──── TaskTokenizer.encode  h_task_re
+
+    GRADIENT FLOWS to (i.e. these modules ARE trained by L_hier):
+      - TaskTokenizer.encode parameters
+      - Action VQ codebook weight (via F.embedding lookup on generated indices)
+      - Planner's task_emb encoding path (through build_cond_mem)
+
+    GRADIENT DOES NOT FLOW to:
+      - AR decoder transformer weights — discrete sampling inside
+        ``decode_generate`` is wrapped in @torch.no_grad and we don't apply
+        Gumbel relaxation.  This is intentional: the AR decoder is already
+        trained densely via cross-entropy (``lambda_planner_ce=1.0``) and
+        CVAE reconstruction (``lambda_cvae_recon=1.0``) — both far stronger
+        signals than the L_hier round-trip would provide.
+
+    The semantics is therefore "force TaskTokenizer + codebook to be
+    inverse-consistent with the AR decoder's current outputs", NOT "train
+    the AR decoder to produce re-encodable sequences".  If you ever need
+    the latter, replace ``decode_generate`` with a soft-token (Gumbel /
+    softmax-then-codebook-mix) path so gradients can flow through AR.
 
     Ablation #3 (planner.use_task_token=False): the hierarchical round-trip
     is conceptually undefined (no task layer to round-trip THROUGH).  Returns
-    0 in that case so the term contributes nothing to the total loss — the
-    caller's lambda should also be set to 0 to keep the loss dict honest.
+    0 in that case — caller's lambda should also be 0 for an honest loss dict.
     """
     # No-hierarchical ablation → return 0 (no task layer to round-trip through)
     if getattr(planner, "task_tok", None) is None:

@@ -111,7 +111,7 @@ class CAPModel(nn.Module):
         if "n_substeps"   in pbd_in: rho_parser_cfg["n_substeps"] = int(pbd_in["n_substeps"])
 
         self.executor = Executor(
-            rho_dim=int(enc_cfg["action_tokenizer"].get("deformation", {}).get("dim", 16)),
+            rho_dim=int(enc_cfg["action_tokenizer"].get("deformation", {}).get("dim", 9)),
             task_dim=task_dim,
             use_tfn_residual=residual_cfg.get("enabled", True),
             tfn_scalar_dim=int(residual_cfg.get("hidden_scalar", 16)),
@@ -154,27 +154,37 @@ class CAPModel(nn.Module):
         executor:    bool = True,
         deform_only: bool = False,
     ) -> None:
-        """Flip ``requires_grad`` on the 3 sub-modules.
+        """Flip ``requires_grad`` AND ``train()/eval()`` on the 3 sub-modules.
+
+        Toggling train/eval (not just requires_grad) is critical because some
+        modules — VectorQuantizer, EMA-VQ, BatchNorm — mutate state in their
+        forward pass guarded by ``self.training``, regardless of grad flags.
+        Without ``.eval()`` those buffers/codebooks still drift in stages
+        where the module should be frozen (e.g. action VQ in PLANNER stage).
 
         ``deform_only=True`` overrides ``executor`` — only ``executor.deform``
         trains (physics-only stage).  Pretrained CLIP text encoder always
         stays frozen; DINO backbone stays frozen iff
         ``obj_enc.freeze_backbone=True`` (config-gated).
         """
-        self._req(self.encoder,  encoder)
-        self._req(self.planner,  planner)
-        self._req(self.executor, executor and not deform_only)
+        self._set_module(self.encoder,  encoder)
+        self._set_module(self.planner,  planner)
+        self._set_module(self.executor, executor and not deform_only)
         if deform_only:
-            self._req(self.executor.deform, True)
-        # Always re-freeze pretrained backbones (idempotent, no need to gate)
+            # executor as a whole is frozen + .eval()'d above; flip ONLY the
+            # deform submodule back into trainable + .train() mode.
+            self._set_module(self.executor.deform, True)
+        # Always re-freeze pretrained backbones (idempotent)
         if self.encoder.obj_enc.freeze_backbone:
-            self._req(self.encoder.obj_enc.backbone, False)
-        self._req(self.planner.lang.text_enc, False)
+            self._set_module(self.encoder.obj_enc.backbone, False)
+        self._set_module(self.planner.lang.text_enc, False)
 
     @staticmethod
-    def _req(m: nn.Module, flag: bool) -> None:
+    def _set_module(m: nn.Module, flag: bool) -> None:
+        """Set requires_grad AND train/eval mode together."""
         for p in m.parameters():
             p.requires_grad = flag
+        m.train(flag)            # flag=False → m.eval() recursively
 
     # ────────────────────────────────────────────────────────────────
     # D. Training forward

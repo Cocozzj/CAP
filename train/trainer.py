@@ -274,8 +274,11 @@ def train_epoch(
     is_main_proc: bool = True,
 ) -> int:
     """Run one training epoch, return updated global_step."""
-    model.train()
     base_model = model.module if hasattr(model, "module") else model
+    # NOTE: do NOT call ``model.train()`` here — _prepare_stage already called
+    # ``set_trainable(...)`` which puts frozen submodules into eval mode.  A
+    # blanket ``model.train()`` would re-enable train-mode side-effects (VQ
+    # codebook EMA, BN running stats, etc.) on supposedly-frozen modules.
     fwd_ctx    = autocast if scaler is not None else contextlib.nullcontext
 
     # Scheduled-sampling ramp inside this stage.  PDF Stage-2 wants
@@ -372,7 +375,11 @@ def run_val(
     Returns total loss averaged per sample (NOT per batch).  Always uses
     ``sample_prob=0`` (pure teacher forcing) for a stable measurement.
     """
-    was_training = base_model.training
+    # Snapshot per-submodule train/eval state so we can restore after val.
+    # We can't just toggle base_model.train()/eval() because some submodules
+    # are intentionally frozen (in eval) for the current stage — see
+    # CAPModel.set_trainable.
+    saved_modes = {n: m.training for n, m in base_model.named_modules()}
     base_model.eval()
     total_sum = 0.0
     n_samples = 0
@@ -411,8 +418,10 @@ def run_val(
         total_sum += losses["total"].item() * B
         n_samples += B
 
-    if was_training:
-        base_model.train()
+    # Restore the exact per-submodule train/eval state we captured above.
+    for n, m in base_model.named_modules():
+        if n in saved_modes:
+            m.training = saved_modes[n]
     return total_sum / max(n_samples, 1)
 
 

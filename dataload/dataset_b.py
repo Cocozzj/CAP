@@ -80,9 +80,14 @@ class DatasetB(Dataset):
             avail = sorted({s for e in entries for s in e.get("splits", [])})
             raise ValueError(f"No entries for split={split!r}.  Available: {avail}")
 
-        # Stable task_id mapping (per-split; same convention as DatasetA)
-        unique_tasks = sorted({e["task_name"] for e in self.entries})
+        # Stable task_id mapping (per-split; defensive: not all SSv2 entries
+        # are guaranteed to have ``task_name``, so fall back to obj_category
+        # then to a literal "_unknown" bucket).
+        def _name(e: Dict) -> str:
+            return e.get("task_name") or e.get("obj_category") or "_unknown"
+        unique_tasks = sorted({_name(e) for e in self.entries})
         self.task_to_id = {t: i for i, t in enumerate(unique_tasks)}
+        self._name_of   = _name
 
     def __len__(self) -> int:
         return len(self.entries)
@@ -102,7 +107,8 @@ class DatasetB(Dataset):
         if arr.ndim != 2:
             return None                                         # unexpected shape — skip
 
-        if arr.shape[-1] != self.image_size:
+        H, W = arr.shape[-2], arr.shape[-1]
+        if H != self.image_size or W != self.image_size:        # check BOTH dims
             from PIL import Image
             arr = np.asarray(
                 Image.fromarray(arr).resize((self.image_size, self.image_size),
@@ -133,7 +139,7 @@ class DatasetB(Dataset):
             "text":       dataset_b_text(e),
             "intrinsics": K,                                        # [1, 3, 3]
             "extrinsics": w2c,                                      # [1, 4, 4]
-            "task_id":    self.task_to_id[e["task_name"]],
+            "task_id":    self.task_to_id[self._name_of(e)],
         }
 
         if self.load_depth:

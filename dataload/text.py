@@ -87,27 +87,45 @@ def task_to_text(task_name: str, obj_category: str) -> str:
 # DatasetB — Something Something v2 has natural English labels already
 # ════════════════════════════════════════════════════════════════════
 
+import re
+
+# SSv2 template placeholders.  In published SSv2 templates the variants seen
+# in the wild are: [something], [something else], [something in something],
+# [number of] (rare).  We match any "[ ... ]" group and fill them in order
+# from ``placeholders`` so we never leave dangling brackets in the output.
+_SSV2_PLACEHOLDER = re.compile(r"\[[^\[\]]+\]")
+
+
 def dataset_b_text(entry: Dict) -> str:
     """Extract natural-language label from a DatasetB manifest entry.
 
     Priority:
       1. ``raw_label``                          ("closing bucket")
-      2. ``template`` filled with ``placeholders`` ("Closing [something]"
-                                                    + ["bucket"] → "Closing bucket")
-      3. ``task_name + obj_category``           fallback so it never crashes
+      2. ``template`` filled IN ORDER with ``placeholders``:
+            "Putting [something] on [something]" + ["mug", "table"]
+              → "Putting mug on table"
+         Handles all SSv2 placeholder variants ([something], [something else],
+         [something in something]) generically via regex — replaces every
+         "[...]" group sequentially with the next placeholder.
+      3. ``task_name + obj_category`` fallback so it never crashes
     """
     raw = entry.get("raw_label")
     if isinstance(raw, str) and raw.strip():
         return raw.strip()
 
-    tpl  = entry.get("template")
-    phs  = entry.get("placeholders") or []
+    tpl = entry.get("template")
+    phs = entry.get("placeholders") or []
     if isinstance(tpl, str) and tpl.strip():
-        # SSv2 templates use [something], [something else], [something in something]
-        text = tpl
-        for ph in phs:
-            text = text.replace("[something]", str(ph), 1)
-        return text.strip()
+        it = iter(phs)
+
+        def _sub(_match):
+            try:
+                return str(next(it))
+            except StopIteration:
+                return ""        # leave nothing if we run out of placeholders
+        text = _SSV2_PLACEHOLDER.sub(_sub, tpl)
+        # Collapse double spaces left by empty-placeholder substitutions
+        return re.sub(r"\s+", " ", text).strip()
 
     return f"{entry.get('task_name', 'do')} {entry.get('obj_category', '')}".strip()
 

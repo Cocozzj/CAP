@@ -1,18 +1,34 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────
-# run_seeds.sh — launch 5 seeded training runs for the main experiment.
+# run_seeds.sh — launch seeded training runs for the main experiment.
+#
+# REQUIRED env vars (trainer's argparse rejects without them):
+#   MANIFEST   path to data/dataset_<a|b>/manifest.json
+#   DATA_DIR   path to data/dataset_<a|b>/data
 #
 # Usage:
-#   tools/run_seeds.sh runs/main_exp           # default: seeds 0..4, sequential
-#   tools/run_seeds.sh runs/main_exp 0 1 2 3 4 # explicit seed list
+#   MANIFEST=data/dataset_a/manifest.json DATA_DIR=data/dataset_a/data \
+#     tools/run_seeds.sh runs/main_exp                # default: seeds 0..4
+#
+#   MANIFEST=... DATA_DIR=... \
+#     tools/run_seeds.sh runs/main_exp 0 1 2 3 4      # explicit seed list
+#
+# Optional env vars:
+#   DATASET           a (default) | b
+#   EXTRA_ARGS        forwarded verbatim to trainer (e.g. "--auto-test --batch-size 16")
+#   TORCHRUN_NPROC    >1 → launch via torchrun for DDP
 #
 # Each seed gets its own subdirectory:  $BASE/seed_${SEED}/
-#
-# Runs SEQUENTIALLY by default — one full curriculum per GPU box.
-# To launch in parallel across machines, drive this from your scheduler
-# (slurm/k8s) with one machine per seed.
+# Runs SEQUENTIALLY by default.  For parallel, drive from slurm/k8s with
+# one machine per seed.
 # ─────────────────────────────────────────────────────────────────────
 set -euo pipefail
+
+# Required: manifest + data-dir.  Fail fast with a clear message instead of
+# letting trainer's argparse print a less-friendly error per seed.
+: "${MANIFEST:?Set MANIFEST=data/dataset_<a|b>/manifest.json before running}"
+: "${DATA_DIR:?Set DATA_DIR=data/dataset_<a|b>/data before running}"
+DATASET="${DATASET:-a}"
 
 BASE="${1:-runs/main_exp}"
 shift || true
@@ -22,8 +38,7 @@ else
     SEEDS=("$@")
 fi
 
-# Read remaining arguments — anything after the seeds list is forwarded
-# to training.py.  Default is single-GPU; switch to torchrun for DDP.
+# Anything in $EXTRA_ARGS is forwarded verbatim to trainer.
 EXTRA_ARGS="${EXTRA_ARGS:-}"
 
 # Multi-GPU: set TORCHRUN_NPROC=N to launch via torchrun on N local GPUs.
@@ -63,6 +78,9 @@ for SEED in "${SEEDS[@]}"; do
         --loss-config configs/loss.yaml \
         --out-dir "${OUT}" \
         --seed "${SEED}" \
+        --dataset "${DATASET}" \
+        --manifest "${MANIFEST}" \
+        --data-dir "${DATA_DIR}" \
         ${EXTRA_ARGS}
 done
 

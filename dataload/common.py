@@ -153,16 +153,22 @@ def load_cameras(cameras_json_path: Path,
 # ============================================================================
 
 def collate_fn(batch: List[Dict]) -> Dict:
-    """Stack fixed-shape tensors; keep per-sample GSParameter list (N varies)."""
+    """Stack fixed-shape tensors; keep per-sample GSParameter list (N varies).
+
+    Optional keys (intrinsics / extrinsics / depth / task_id) are stacked only
+    when ALL samples have them.  Mixed-presence is silently dropped to avoid
+    KeyError surprises — call ``has_field(batch_dict, key)`` downstream if you
+    need to know whether the field made it through collation.
+    """
     out: Dict = {
         "frames":    torch.stack([b["frames"] for b in batch], dim=0),
         "gs_params": [b["gs_params"] for b in batch],
         "text":      [b["text"] for b in batch],
     }
     for k in ("intrinsics", "extrinsics", "depth"):
-        if k in batch[0]:
+        if all(k in b for b in batch):
             out[k] = torch.stack([b[k] for b in batch], dim=0)
-    if "task_id" in batch[0]:
+    if all("task_id" in b for b in batch):
         out["task_id"] = torch.tensor([b["task_id"] for b in batch], dtype=torch.long)
     return out
 

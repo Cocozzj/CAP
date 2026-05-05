@@ -305,19 +305,20 @@ class ActionTokenizer(nn.Module):
             nn.Linear(in_dim, in_dim),
         )
 
-        # ── Physical param heads (auxiliary supervision with GT) ──
-        self.head_l = nn.Linear(d_l, 3)                        # → ℝ³ translation
-        self.head_h = nn.Linear(d_h, 6)                       # →  6D + Gram-Schmidt
-        self.head_xi = nn.Linear(d_xi, 3)                      # → so(3) vector
-        # Auxiliary supervision head: maps d_rho → n physical components.
-        # n_params is derived from len(components) to stay consistent with config.
-        # This is SEPARATE from executor's RhoParser which independently
-        # decodes the full d_rho embedding into structured physics params.
-        components = deform_cfg.get("components", [])
-        rho_params = len(components) if components else int(deform_cfg.get("n_params", 4))
-        self.head_rho = (
-            nn.Linear(d_rho, rho_params) if self.use_rho else None
-        )
+        # ── Physical param heads ──────────────────────────────────────
+        # ℓ / h / ξ each have a small projection head that turns the sub-token
+        # into the canonical physical parameterisation (translation, 6D rot,
+        # so(3) twist).
+        # ρ is DIFFERENT: per Physics Plugin PDF §1.3, ρ is a structured tuple
+        # of named physical parameters (E, ν, ρ_m, F, μ, damping, dt) — NOT a
+        # latent embedding.  So d_rho is set to match the required slot count
+        # (currently 9, see RhoParser.RHO_DIM) and ``q_rho`` IS the output —
+        # no extra head is needed.  RhoParser slices it directly.
+        self.head_l  = nn.Linear(d_l, 3)                        # → ℝ³ translation
+        self.head_h  = nn.Linear(d_h, 6)                        # → 6D + Gram-Schmidt
+        self.head_xi = nn.Linear(d_xi, 3)                       # → so(3) vector
+        # NOTE: head_rho was previously here as auxiliary supervision; removed
+        # because q_rho now directly carries the named physics slots.
 
     # ---------------------------------------------------------------
     # Physical codebook initialization
@@ -460,9 +461,11 @@ class ActionTokenizer(nn.Module):
         magnitude = self.xi_max_norm * torch.tanh(norm / self.xi_max_norm)
         pred_micro_rot = direction * magnitude
         
-        pred_deform = (
-            self.head_rho(q_rho) if self.use_rho else None
-        )
+        # ρ: q_rho IS the named physics tuple — feed it directly to the
+        # executor (RhoParser will slice it per RHO_DIM=9 slots).
+        # When use_rho=False (physics plugin disabled), we surface a zero
+        # tensor so downstream shape checks still pass.
+        pred_deform = q_rho if self.use_rho else None
 
         return {
             "tokens": indices,                                  # [B, T, K]
@@ -566,7 +569,10 @@ class ActionTokenizer(nn.Module):
         pred_micro_rot = direction * magnitude
 
         # ── Deformation (None when physics plugin is disabled) ──
-        pred_deform = self.head_rho(q_rho) if self.use_rho else None
+        # ρ is the named physics tuple itself (Physics-Plugin PDF §1.3, see
+        # ``model/executor/deform/rho_parser.py`` for slot map).  q_rho IS the
+        # output — no head_rho projection needed.  Mirrors the forward path.
+        pred_deform = q_rho if self.use_rho else None
 
         return {
             "translation":    pred_translation,

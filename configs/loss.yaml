@@ -1,0 +1,75 @@
+
+# ================================================================
+# Loss weights & hyper-parameters  (aligned with train_plan.md §8)
+# ================================================================
+loss:
+  # A. Algebraic structure
+  lambda_clos:            0.5
+  lambda_inv:             0.5
+  lambda_equiv:           0.3       # Stage-2 only (cross-object equivariance)
+  lambda_comm:            0.01      # base weight; ramped 0.01→0.1 in Stage-2
+  lambda_equiv_cross:     0.3       # cross-object equivariance (Prop 3)
+  # B. Reconstruction
+  lambda_rec:             1.0       # outer weight for L_recon (plan §8)
+  lambda_rec_mse:         0.2
+  lambda_rec_lpips:       0.1
+  lambda_depth:           0.5
+  # C. Semantic alignment
+  lambda_nce:             0.3       # InfoNCE — all stages
+  nce_temperature:        0.07
+  # D. Quantization & planning
+  lambda_vq:              1.0
+  lambda_cvae_kl:         0.01      # KL base; annealed β: 0.01→1.0 in Stage-2
+  lambda_cvae_recon:      1.0
+  lambda_hier:            0.2       # hierarchical consistency — Stage-2 only
+  # E. Regularization
+  lambda_lip:             0.1
+  lip_target_C:           2.0
+  lip_epsilon:            0.01
+  lambda_entropy:         0.05      # codebook entropy — Stage-2 only
+  entropy_H_min:          3.0
+  entropy_H_max:          8.0
+  lambda_physics:         0.5       # physics total weight — Stage-1/2
+  lambda_physics_vol:     0.5
+  lambda_physics_contact: 1.0
+  lambda_physics_energy:  1.0
+  physics_contact_d_min:  0.01
+
+
+# ================================================================
+# Training: optimizer, scheduler, 3-stage curriculum
+# ================================================================
+training:
+  seed: 42
+  max_epochs: 100
+  # 3-stage curriculum: epoch boundaries
+  stage_schedule:
+    stage_1_end: 50           # epochs [ 0, 50): RIGID — Encoder + Executor rigid
+    stage_2_end: 70           # epochs [50, 70): PHYSICS — deform/physics warm-up
+                              # epochs [70,100): FULL — end-to-end fine-tune
+  optimizer:
+    type: adamw
+    lr: 1.0e-4            # Stage-0 base LR (per-stage LR set in train_ddp.py)
+    betas: [0.9, 0.999]
+    weight_decay: 1.0e-5
+  scheduler:
+    type: cosine
+    warmup_epochs: 5
+    min_lr: 1.0e-6
+  # Gumbel-softmax temperature annealing (slot attention)
+  tau_schedule:
+    start: 1.0
+    end: 0.1
+    anneal_epochs: 30
+  # CVAE scheduled sampling probability
+  sample_prob_schedule:
+    start: 0.0
+    end: 0.5
+    ramp_epochs: 15
+    start_epoch: 70          # start at Stage-2 (Planner is frozen before this)
+  # Gradient clipping
+  grad_clip: 1.0
+  # Logging & checkpointing
+  log_interval: 10           # steps between log prints
+  save_interval: 5           # epochs between checkpoint saves
+  output_dir: "outputs/"

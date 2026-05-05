@@ -52,14 +52,35 @@ import os
 import random
 import shutil
 import time
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+# ── Suppress noisy 3rd-party warnings BEFORE importing torch/transformers ──
+# These fire every batch and drown the actual training log.  None of them
+# represent bugs in our code — they're internal deprecation chatter from
+# torchvision (LPIPS dependency), HuggingFace tokenizers, and PyTorch's
+# Transformer module.  Suppressing here is purely cosmetic.
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")          # HF tokenizers fork warning
+# NOTE: TORCH_CUDA_ARCH_LIST is intentionally NOT set — leaving it unset lets
+# PyTorch auto-detect visible cards' compute capability.  Set it manually
+# (e.g. "8.0;9.0") in your shell to speed up gsplat first-build on heterogeneous
+# clusters.  We just suppress the informational warning below.
+warnings.filterwarnings("ignore", message=".*TORCH_CUDA_ARCH_LIST is not set.*")
+warnings.filterwarnings("ignore", message=".*pretrained.*deprecated.*")          # torchvision LPIPS
+warnings.filterwarnings("ignore", message=".*weights_only.*")                    # torch.load LPIPS
+warnings.filterwarnings("ignore", message=".*enable_nested_tensor.*")            # nn.TransformerEncoder
+warnings.filterwarnings("ignore", message=".*key_padding_mask and attn_mask.*")  # nn.MultiheadAttention
+warnings.filterwarnings("ignore", message=".*Codebook K.*lattice size.*")        # our own ActionTokenizer init notice (harmless)
 
 import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.cuda.amp import GradScaler, autocast
+# Modern torch.amp API (torch>=2.0).  ``GradScaler('cuda')`` and
+# ``autocast(device_type='cuda')`` replace the deprecated torch.cuda.amp.*
+# entry points — same functionality, no deprecation warnings.
+from torch.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
 from torch.utils.tensorboard import SummaryWriter
@@ -279,7 +300,9 @@ def train_epoch(
     # ``set_trainable(...)`` which puts frozen submodules into eval mode.  A
     # blanket ``model.train()`` would re-enable train-mode side-effects (VQ
     # codebook EMA, BN running stats, etc.) on supposedly-frozen modules.
-    fwd_ctx    = autocast if scaler is not None else contextlib.nullcontext
+    # New API requires device_type kwarg → wrap into a no-arg factory.
+    fwd_ctx    = ((lambda: autocast(device_type="cuda"))
+                  if scaler is not None else contextlib.nullcontext)
 
     # Scheduled-sampling ramp inside this stage.  PDF Stage-2 wants
     # sample_prob to rise so AR decoder gets used to its own tokens at
@@ -471,7 +494,7 @@ def _prepare_stage(
         model = base_model
 
     optimizer = build_optimizer(model, spec.lr)
-    scaler    = GradScaler() if (use_amp and torch.cuda.is_available()) else None
+    scaler    = GradScaler("cuda") if (use_amp and torch.cuda.is_available()) else None
     writer    = SummaryWriter(log_dir / spec.name) if is_main_proc else None
 
     # P1-4: restore optimizer/scaler state ONLY when resuming mid-stage (caller

@@ -455,6 +455,14 @@ class DeformSim(nn.Module):
             mu_flat, rho_flat, params.dt,
             n_substeps=params.n_substeps, mask=mask_flat,
         )                                                                # [M, N, 3]
+        # Safety: TFN-based vfield can produce inf/NaN on first physics-enabled
+        # step (untrained network seeing in-distribution ρ for the first time).
+        # Clamp here so the value that gets stored in aux["vfield_delta"]
+        # (line below at the dict return) is always finite — otherwise
+        # physics_loss.vol = ‖vfield_delta‖² → NaN, poisoning every loss
+        # term that reads aux (closure / inverse / commutator / physics_*).
+        vf_delta = torch.nan_to_num(vf_delta, nan=0.0, posinf=0.0, neginf=0.0)
+        vf_delta = vf_delta.clamp(-self.max_delta_mu, self.max_delta_mu)
 
         # ── Physics backends (mask-aware) ────────────────────────────
         mu_for_phys = mu_flat + vf_delta

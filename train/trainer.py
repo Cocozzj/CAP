@@ -375,7 +375,8 @@ def train_epoch(
         # NaN diagnostic: when total is NaN, dump every per-component loss
         # value so we can localise WHICH term blew up.  Fires only on first
         # NaN per epoch to avoid log spam.
-        if is_main_proc and torch.isnan(total).any() and not getattr(train_epoch, "_nan_reported", False):
+        is_nan_total = torch.isnan(total).any() or torch.isinf(total).any()
+        if is_main_proc and is_nan_total and not getattr(train_epoch, "_nan_reported", False):
             print(f"\n  ⚠ NaN detected at stage={spec.name} step={global_step} — per-component breakdown:")
             for k, v in sorted(losses.items()):
                 if isinstance(v, torch.Tensor):
@@ -384,7 +385,14 @@ def train_epoch(
                     print(f"      {k:20s} = {val:+.4f}{flag}")
             train_epoch._nan_reported = True
 
-        _step(model, optimizer, scaler, total, grad_clip)
+        # Safety: if total is STILL non-finite after CAPLoss's per-component
+        # sanitize (shouldn't happen, but defensive), skip the optimizer step
+        # to avoid corrupting parameters with NaN gradients.  Training
+        # continues from the previous (finite) parameter snapshot.
+        if is_nan_total:
+            optimizer.zero_grad(set_to_none=True)
+        else:
+            _step(model, optimizer, scaler, total, grad_clip)
         global_step += 1
 
         if is_main_proc and (batch_idx % log_every == 0):

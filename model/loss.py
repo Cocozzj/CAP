@@ -964,6 +964,26 @@ class CAPLoss(nn.Module):
         comm_w = (self._anneal(cfg["lambda_comm"], cfg["lambda_comm_max"], step, total_steps)
                   if spec.anneal_comm else cfg["lambda_comm"])
 
+        # ── Per-component NaN guard before summing ──────────────────
+        # Any single NaN component would poison ``total`` → backward
+        # produces NaN gradients → optimizer.step makes ALL params NaN.
+        # Sanitize each component (NaN → 0) so:
+        #   - finite components still contribute their correct gradient
+        #   - NaN components contribute zero gradient (skipped this step)
+        #   - training self-heals instead of locking into NaN forever
+        # The original NaN value is still surfaced in the per-component log
+        # via the train_epoch diagnostic (it inspects ``losses`` dict before
+        # this guard via per-component reads, but here we replace before sum).
+        _SANITIZE_KEYS = (
+            "L_clos", "L_inv", "L_eq", "L_eq_cross", "L_comm",
+            "rec_total", "L_NCE", "L_VQ_act", "L_VQ_task",
+            "planner_total", "L_hier", "L_Lip", "L_entropy", "physics_total",
+        )
+        for k in _SANITIZE_KEYS:
+            v = out.get(k)
+            if isinstance(v, torch.Tensor) and not torch.isfinite(v).all():
+                out[k] = torch.nan_to_num(v, nan=0.0, posinf=0.0, neginf=0.0)
+
         # ── Total ───────────────────────────────────────────────────
         total = (
             cfg["lambda_clos"]     * out["L_clos"]

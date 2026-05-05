@@ -569,9 +569,31 @@ def reconstruction_loss(
             out["depth"] = F.l1_loss(pred_depth, gt_depth)
         elif gt_depth.dim() == 4:
             # Static initial-frame depth (DatasetB).  Compare to pred_depth[:, :, 0]
-            # only if the renderer included the initial timestep.
-            pred0 = pred_depth[:, :, 0, 0]                     # [B, V, H, W]
-            out["depth"] = F.l1_loss(pred0, gt_depth)
+            # only if the renderer actually rendered the initial timestep — if it
+            # didn't (e.g. ``rendered_timesteps=[15, 29]``), the t=0 slice is bogus
+            # and we silently skip the depth term.
+            if rendered_timesteps is not None and rendered_timesteps[0] != 0:
+                out["depth"] = pred_frames.new_zeros(())
+            else:
+                pred0 = pred_depth[:, :, 0, 0]                     # [B, V, H, W]
+                # MiDaS / DepthAnything output is *scale-ambiguous* (relative
+                # disparity).  pred0 is rendered metric-style depth.  Their raw
+                # ranges differ by 10-100×, so plain L1 explodes and dominates
+                # ``rec_total``.  Normalise each sample by its own median before
+                # comparison — turns this into a scale-invariant L1.
+                eps = 1e-6
+                # ``.detach()`` on the medians: we only want the raw values to
+                # carry gradient, not the per-sample scale (otherwise the loss
+                # has a degenerate fixed point where shrinking pred0 also
+                # shrinks its own normaliser).  Standard pattern for
+                # scale-invariant L1 (see MiDaS / DPT papers).
+                p_med = pred0.detach().flatten(1).median(dim=1, keepdim=True).values \
+                              .view(pred0.shape[0], 1, 1, 1)
+                g_med = gt_depth.flatten(1).median(dim=1, keepdim=True).values \
+                              .view(gt_depth.shape[0], 1, 1, 1)
+                pred0_norm = pred0    / (p_med.abs() + eps)
+                gt_norm    = gt_depth / (g_med.abs() + eps)
+                out["depth"] = F.l1_loss(pred0_norm, gt_norm)
         else:
             out["depth"] = pred_frames.new_zeros(())
     else:

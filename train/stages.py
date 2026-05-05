@@ -155,9 +155,16 @@ DATASET_B_STAGES: List[StageSpec] = [
         encoder=True, planner=True, executor=True, deform_only=False,
         enable_physics=True,
         run_planner=True,
-        # Match A's FULL stage scheduled-sampling, but no ramp (start fully on)
+        # Match A's FULL-stage scheduled-sampling endpoint, but keep a short
+        # ramp.  Even though the model was trained on A with sample_prob=0.5,
+        # B's text distribution (SSv2 natural English vs PartNet templates)
+        # is different enough that hitting 50% AR-self-sampling in step 0
+        # injects noisy gradients into Planner just as it sees these prompts
+        # for the first time.  Ramp 0 → 0.5 over 5 ep gives Planner a chance
+        # to align text → task_emb on the new distribution before relying on
+        # its own samples.
         sample_prob_max=0.5,
-        sample_prob_ramp_epochs=0,                       # already trained on A → no ramp
+        sample_prob_ramp_epochs=5,
         render_n_timesteps=5,
         loss=LossSpec(
             enable_physics=True,

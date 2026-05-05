@@ -1,153 +1,240 @@
-"""Invoke PhysDreamer on each test trajectory and collect outputs.
+"""Invoke PhysDreamer on every prepared trajectory, collect outputs into
+the unified baseline format.
 
-SKELETON — adjust to PhysDreamer's actual CLI / output format after cloning
-their repo.  See ../README.md for setup.
+Workflow:
+  1. ``convert_data.py`` writes ``physdreamer_config.json`` + ``init_gs.ply``
+     under ``runs/baselines/physdreamer/<dataset>/<split>/<traj_id>/``.
+  2. This script iterates each, calls PhysDreamer's inference command with
+     the config + ply, and writes the output into ``raw/`` next to the config.
+  3. ``parse_outputs.py`` translates the raw output → ``pred_4dgs.npz``.
+
+PhysDreamer's exact CLI may differ between versions.  See the
+``--probe`` flag below to print the constructed command without running.
 
 Usage:
 
+    # Set environment variable once:
+    export PHYSDREAMER_REPO=~/PhysDreamer
+
+    # Then iterate all prepared trajectories:
     python -m eval.baseline.physdreamer.run_eval \\
-        --manifest dataset/dataset_a/manifest.json \\
-        --data-dir dataset/dataset_a/data \\
-        --splits test_iid \\
         --output-root runs/baselines \\
+        --dataset-name dataset_a \\
+        --splits test_iid \\
         --physdreamer-repo $PHYSDREAMER_REPO
+
+    # Dry-run (just print what would be invoked):
+    python -m eval.baseline.physdreamer.run_eval ... --probe
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
-import numpy as np
-
-from dataload.text import task_to_text
-
-from ..common import (
-    GS4DSequence,
-    TrajMetrics,
-    baseline_output_dir,
-    iter_split_entries,
-)
+from ..common import TrajMetrics
+from .parse_outputs import parse_physdreamer_output
 
 
-def _run_physdreamer_one(
-    init_gs_path: Path,
-    text:         str,
-    out_dir:      Path,
-    physdreamer_repo: Path,
-    timeout_secs: int = 600,
-) -> tuple[bool, str]:
-    """Call PhysDreamer's inference script on a single trajectory.
+# ──────────────────────────────────────────────────────────────────────
+# Discover PhysDreamer's inference entrypoint
+# ──────────────────────────────────────────────────────────────────────
 
-    TODO: replace this with the actual command after inspecting their repo:
-      python <repo>/inference.py --gs <init_gs.ply> --prompt <text> --output <dir>
-    """
-    cmd = [
-        "python", str(physdreamer_repo / "inference.py"),
-        "--gs",     str(init_gs_path),
-        "--prompt", text,
-        "--output", str(out_dir),
+def _discover_inference_script(repo: Path) -> Optional[Path]:
+    """Try common script names for PhysDreamer's inference entry."""
+    candidates = [
+        "inference.py",
+        "run_inference.py",
+        "scripts/inference.py",
+        "scripts/run.py",
+        "demo.py",
     ]
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True,
-                            timeout=timeout_secs, cwd=str(physdreamer_repo))
-    except subprocess.TimeoutExpired:
-        return False, f"timeout after {timeout_secs}s"
-    except FileNotFoundError as e:
-        return False, f"physdreamer script not found: {e}"
-
-    if r.returncode != 0:
-        return False, f"returncode={r.returncode}  stderr_tail={(r.stderr or '')[-300:]!r}"
-    return True, "ok"
-
-
-def _collect_physdreamer_output(out_dir: Path) -> Optional[GS4DSequence]:
-    """Read PhysDreamer's per-trajectory output and convert to our GS4DSequence.
-
-    TODO: implement after inspecting PhysDreamer's actual output schema.
-    Typical schemas:
-      - Per-frame .ply files in `frames/`
-      - A single .npz with stacked Gaussian arrays
-      - A rendered video (no 4DGS; in that case we'd need a fallback)
-    """
-    # Try common output formats
-    npz_files = list(out_dir.glob("*.npz"))
-    if npz_files:
-        try:
-            z = np.load(npz_files[0])
-            return GS4DSequence(
-                mu=z["mu"], cov=z["cov"], sh=z["sh"],
-                opacity=z["opacity"], scale=z["scale"],
-            )
-        except KeyError:
-            pass
+    for c in candidates:
+        p = repo / c
+        if p.exists():
+            return p
     return None
 
 
+def _build_cmd(
+    script: Path,
+    config_path: Path,
+    init_gs_path: Path,
+    out_dir: Path,
+    extra_args: List[str],
+) -> List[str]:
+    """Default CLI assumption — adjust to PhysDreamer's actual args."""
+    return [
+        "python", str(script),
+        "--config",      str(config_path),
+        "--model_path",  str(init_gs_path),
+        "--output_path", str(out_dir),
+        *extra_args,
+    ]
+
+
+def _run_one(
+    script:        Path,
+    config_path:   Path,
+    init_gs_path:  Path,
+    out_dir:       Path,
+    repo_cwd:      Path,
+    timeout_secs:  int,
+    extra_args:    List[str],
+    probe:         bool = False,
+) -> Tuple[bool, str]:
+    """Invoke PhysDreamer once on a single trajectory."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cmd = _build_cmd(script, config_path, init_gs_path, out_dir, extra_args)
+
+    if probe:
+        print("  [probe] " + " ".join(str(c) for c in cmd))
+        return True, "probe (not executed)"
+
+    try:
+        r = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout_secs,
+            cwd=str(repo_cwd),
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"timeout after {timeout_secs}s"
+    except FileNotFoundError as e:
+        return False, f"script not found: {e}"
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+    if r.returncode != 0:
+        err = (r.stderr or "")[-400:]
+        return False, f"returncode={r.returncode}  stderr_tail={err!r}"
+    return True, "ok"
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Main
+# ──────────────────────────────────────────────────────────────────────
+
 def main(argv: List[str] | None = None) -> int:
     p = argparse.ArgumentParser()
-    p.add_argument("--manifest", required=True)
-    p.add_argument("--data-dir", required=True)
-    p.add_argument("--splits",   nargs="+", default=["test_iid"])
     p.add_argument("--output-root",     default="runs/baselines")
     p.add_argument("--dataset-name",    default="dataset_a")
-    p.add_argument("--physdreamer-repo", required=True,
+    p.add_argument("--splits",          nargs="+", default=None,
+                   help="if None, run on all splits found")
+    p.add_argument("--physdreamer-repo", required=False,
+                   default=os.environ.get("PHYSDREAMER_REPO", ""),
                    help="path to cloned PhysDreamer repo (or set $PHYSDREAMER_REPO)")
-    p.add_argument("--timeout", type=int, default=600)
-    p.add_argument("--limit",   type=int, default=None)
+    p.add_argument("--script", default=None,
+                   help="explicit path to inference.py (overrides auto-discovery)")
+    p.add_argument("--extra-args", nargs="*", default=[],
+                   help="extra CLI args to pass through to PhysDreamer's inference")
+    p.add_argument("--timeout", type=int, default=900,
+                   help="per-trajectory timeout (s); diffusion is slow, default 15min")
+    p.add_argument("--limit", type=int, default=None)
+    p.add_argument("--skip-existing", action="store_true",
+                   help="skip trajectories that already have pred_4dgs.npz")
+    p.add_argument("--probe", action="store_true",
+                   help="dry-run: print constructed commands, do not execute")
     args = p.parse_args(argv)
 
-    pd_repo = Path(args.physdreamer_repo).expanduser().resolve()
-    if not (pd_repo / "inference.py").exists():
-        print(f"⚠ PhysDreamer inference.py not at {pd_repo} — paths in run_eval.py "
-              f"may need adjustment.", file=sys.stderr)
+    # Locate PhysDreamer
+    if not args.physdreamer_repo:
+        print("✗ --physdreamer-repo required (or set $PHYSDREAMER_REPO)",
+              file=sys.stderr)
+        return 1
+    repo = Path(args.physdreamer_repo).expanduser().resolve()
+    if not repo.exists():
+        print(f"✗ PhysDreamer repo not found at {repo}", file=sys.stderr)
+        return 1
 
-    n_total = n_ok = n_fail = 0
+    script = Path(args.script).expanduser().resolve() if args.script else \
+             _discover_inference_script(repo)
+    if script is None or not script.exists():
+        print(f"✗ could not find PhysDreamer's inference script under {repo}",
+              file=sys.stderr)
+        print(f"  use --script to specify it explicitly", file=sys.stderr)
+        return 1
+    print(f"⏬ using PhysDreamer script: {script}")
+
+    base = Path(args.output_root) / "physdreamer" / args.dataset_name
+    if not base.exists():
+        print(f"✗ no convert_data outputs at {base}", file=sys.stderr)
+        print(f"  run convert_data.py first to prepare per-trajectory configs.",
+              file=sys.stderr)
+        return 1
+
+    splits = args.splits or [d.name for d in sorted(base.iterdir()) if d.is_dir()]
+
+    n_total = n_ok = n_skip = n_fail = 0
     t0 = time.time()
-    for split in args.splits:
+    for split in splits:
+        split_dir = base / split
+        if not split_dir.exists():
+            continue
         print(f"\n=== Split: {split} ===")
-        n_split = 0
-        for traj_id, traj_dir, entry in iter_split_entries(
-            args.manifest, args.data_dir, split,
-        ):
-            if args.limit is not None and n_split >= args.limit:
+        for traj_dir in sorted(split_dir.iterdir()):
+            if not traj_dir.is_dir():
+                continue
+            if args.limit is not None and n_total >= args.limit:
                 break
-            n_split += 1
             n_total += 1
 
-            text     = task_to_text(entry["task_name"], entry.get("obj_category", ""))
-            init_gs  = traj_dir / "init_gs.ply"
-            out_dir  = baseline_output_dir(
-                args.output_root, "physdreamer",
-                args.dataset_name, split, traj_id,
-            )
+            cfg_path  = traj_dir / "physdreamer_config.json"
+            ply_path  = traj_dir / "init_gs.ply"
+            pred_path = traj_dir / "pred_4dgs.npz"
 
-            success, msg = _run_physdreamer_one(
-                init_gs, text, out_dir / "raw", pd_repo, timeout_secs=args.timeout,
+            if not cfg_path.exists() or not ply_path.exists():
+                n_skip += 1
+                continue
+            if args.skip_existing and pred_path.exists():
+                n_skip += 1
+                continue
+
+            raw_dir = traj_dir / "raw"
+            success, msg = _run_one(
+                script, cfg_path, ply_path, raw_dir,
+                repo_cwd=repo, timeout_secs=args.timeout,
+                extra_args=args.extra_args, probe=args.probe,
             )
             if not success:
-                TrajMetrics(notes=f"physdreamer_failed: {msg}").save(out_dir / "metrics.json")
+                TrajMetrics(notes=f"physdreamer_failed: {msg[:200]}").save(
+                    traj_dir / "metrics.json")
+                if n_fail < 3 or n_fail % 10 == 0:
+                    print(f"  ✗ {traj_dir.name}  {msg}")
                 n_fail += 1
                 continue
 
-            seq = _collect_physdreamer_output(out_dir / "raw")
+            if args.probe:
+                # Don't try to parse outputs in probe mode
+                n_ok += 1
+                continue
+
+            # Parse PhysDreamer's raw output → GS4DSequence
+            seq = parse_physdreamer_output(raw_dir, init_ply=ply_path)
             if seq is None:
-                TrajMetrics(notes="physdreamer_output_parse_failed").save(out_dir / "metrics.json")
+                TrajMetrics(notes="physdreamer_output_parse_failed").save(
+                    traj_dir / "metrics.json")
                 n_fail += 1
+                if n_fail < 3:
+                    print(f"  ✗ {traj_dir.name}  ran but couldn't parse outputs in {raw_dir}")
+                    print(f"    Inspect that directory and adjust parse_outputs.py")
                 continue
 
-            seq.save(out_dir / "pred_4dgs.npz")
-            TrajMetrics(notes="pending_eval").save(out_dir / "metrics.json")
+            seq.save(pred_path)
+            TrajMetrics(notes="pending_eval").save(traj_dir / "metrics.json")
             n_ok += 1
             if n_ok <= 3 or n_ok % 50 == 0:
-                print(f"  ✓ {traj_id}")
+                print(f"  ✓ {traj_dir.name}  T={seq.T} N={seq.N}")
 
-    print(f"\n=== PhysDreamer complete: ok={n_ok}, failed={n_fail}, "
-          f"total={n_total}, elapsed={time.time()-t0:.1f}s ===")
+    print(f"\n=== PhysDreamer complete ===")
+    print(f"  total:   {n_total}")
+    print(f"  ok:      {n_ok}")
+    print(f"  skipped: {n_skip}")
+    print(f"  failed:  {n_fail}")
+    print(f"  elapsed: {time.time()-t0:.1f}s")
     return 0 if n_fail == 0 else 1
 
 

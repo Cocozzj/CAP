@@ -46,7 +46,11 @@ loss:
   lambda_hier:            0.2
 
   # E. Regularization — physics strengthened
-  lambda_lip:             0.01
+  # NB: lambda_lip lowered from A's 0.01 → 0.005 because B starts from an
+  # already-stable vfield (resumed from main_exp_final.pt), so the strong
+  # spectral-norm pull is unnecessary and risks blowing up under SSv2's
+  # distribution shift in the first few iterations.
+  lambda_lip:             0.005
   lip_target_C:           2.0
   lip_epsilon:            0.01
   lambda_entropy:         0.05
@@ -63,8 +67,12 @@ loss:
 # Training (B fine-tune): single stage, no stage anneal needed
 # ================================================================
 training:
-  # Tau anneal stays the same — short fine-tune still benefits from low τ
+  # Tau anneal: B resumes from A's main_exp_final.pt where Gumbel temperature
+  # had long since settled at 0.1 (A annealed 1.0→0.1 over the FIRST 30 of its
+  # 150 total epochs, then stayed at 0.1 for ~115 epochs).  Restarting at 0.3
+  # in B would re-soften slot attention and shake the disentangled codebook
+  # *exactly* when fine-tune wants to preserve it.  Hold near 0.1 throughout B.
   tau_schedule:
-    start: 0.3       # B starts where A's tau ended (lower than A's 1.0 init)
-    end:   0.1
-    anneal_epochs: 30
+    start: 0.1
+    end:   0.05
+    anneal_epochs: 15      # finish anneal in first half of B's 30-epoch run

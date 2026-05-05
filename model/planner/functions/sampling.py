@@ -173,6 +173,15 @@ def pick_tokens(
     # dtype-normalize
     x = logits.to(dtype=torch.float32)
 
+    # NaN/Inf guard — torch.multinomial / softmax produce CUDA device-side
+    # asserts when logits contain non-finite values.  Replace NaN/+Inf with
+    # a large-but-finite floor; -Inf stays as a hard mask (unreachable).
+    # Without this guard, transient training instabilities (early CVAE/AR
+    # before convergence) crash the whole run instead of just producing
+    # a low-quality sample.
+    finfo_max = torch.finfo(x.dtype).max
+    x = torch.nan_to_num(x, nan=0.0, posinf=finfo_max / 2, neginf=-finfo_max / 2)
+
     # repetition penalty (ignore PAD)
     if generated_ids is not None:
         x = _apply_repetition_penalty(x, generated_ids, float(repetition_penalty), pad_id=pad_id)

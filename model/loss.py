@@ -680,9 +680,14 @@ def hierarchical_loss(
     if getattr(planner, "task_tok", None) is None:
         return task_emb.new_zeros(())
 
-    # Generate atomic seq from task_emb (deterministic for stability)
+    # Generate atomic seq from task_emb — force GREEDY sampling for stability.
+    # NOTE: ``cfg["deterministic"]`` is NOT read by Sampler (it reads
+    # ``cfg["strategy"]`` which defaults to "multinomial").  We must set
+    # strategy explicitly, otherwise multinomial sampling on possibly
+    # non-finite logits triggers CUDA device-side asserts.
     cfg = dict(sampling_cfg or {})
-    cfg["deterministic"] = True
+    cfg["strategy"]      = "greedy"
+    cfg["temperature"]   = 1.0
     cfg["num_samples"]   = 1
     z = task_emb.new_zeros(task_emb.size(0), planner.cvae.z_dim)
     cond_mem, mem_mask = planner.cvae.build_cond_mem(task_emb=task_emb, z_task=z)

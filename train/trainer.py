@@ -67,8 +67,18 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")          # HF tokenizer
 # (e.g. "8.0;9.0") in your shell to speed up gsplat first-build on heterogeneous
 # clusters.  We just suppress the informational warning below.
 warnings.filterwarnings("ignore", message=".*TORCH_CUDA_ARCH_LIST is not set.*")
-warnings.filterwarnings("ignore", message=".*pretrained.*deprecated.*")          # torchvision LPIPS
-warnings.filterwarnings("ignore", message=".*weights_only.*")                    # torch.load LPIPS
+
+# Module-level filters — block ALL warnings from these external packages whose
+# internal deprecations we cannot fix (LPIPS calls torchvision with old API,
+# torch.load defaults haven't been updated by lpips, etc.).  This is more
+# robust than message-regex filters which only catch a single phrasing.
+warnings.filterwarnings("ignore", category=UserWarning,   module=r"torchvision\..*")
+warnings.filterwarnings("ignore", category=FutureWarning, module=r"torchvision\..*")
+warnings.filterwarnings("ignore", category=UserWarning,   module=r"lpips\..*")
+warnings.filterwarnings("ignore", category=FutureWarning, module=r"lpips\..*")
+
+# Specific message filters for warnings that don't carry a useful module name
+warnings.filterwarnings("ignore", message=".*weights_only.*")                    # torch.load (LPIPS triggers)
 warnings.filterwarnings("ignore", message=".*enable_nested_tensor.*")            # nn.TransformerEncoder
 warnings.filterwarnings("ignore", message=".*key_padding_mask and attn_mask.*")  # nn.MultiheadAttention
 warnings.filterwarnings("ignore", message=".*Codebook K.*lattice size.*")        # our own ActionTokenizer init notice (harmless)

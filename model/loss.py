@@ -535,7 +535,11 @@ def reconstruction_loss(
                 stride = max(T_gt // T_pred, 1)
                 gt_idx = list(range(0, T_gt, stride))[:T_pred]
         gt_frames = gt_frames[:, :, gt_idx]
-        if pred_depth is not None and gt_depth is not None and gt_depth.dim() >= 3:
+        # Only the per-frame (6-D) depth tensor has a time axis at dim 2.
+        # The 4-D static format used by DatasetB (MiDaS first-frame depth) has
+        # shape [B, V, H, W] — slicing dim 2 here would corrupt the H axis
+        # (e.g. produce [B, V, T_pred, W] instead of [B, V, H, W]).
+        if pred_depth is not None and gt_depth is not None and gt_depth.dim() == 6:
             gt_depth = gt_depth[:, :, gt_idx]
 
     out["mse"] = F.mse_loss(pred_frames, gt_frames)

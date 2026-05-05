@@ -714,6 +714,43 @@ def _load_configs(args) -> Tuple[dict, dict]:
     return cfg, loss_cfg
 
 
+def _check_renderer_sanity(loss_cfg: dict, is_main_proc: bool) -> None:
+    """Detect the silent-failure case: yaml asks for rec/lpips/depth losses
+    but the gsplat renderer isn't available → exec_out["rendered_frames"]
+    will always be None → reconstruction_loss early-exits to 0.
+
+    Print a LOUD warning so the user catches misconfigured installs before
+    spending hours training without any pixel-level supervision.
+    """
+    if not is_main_proc:
+        return
+    cfg = loss_cfg.get("loss", loss_cfg) or {}
+    rec_weights = {
+        "lambda_rec":       float(cfg.get("lambda_rec",       0.0)),
+        "lambda_rec_mse":   float(cfg.get("lambda_rec_mse",   0.0)),
+        "lambda_rec_lpips": float(cfg.get("lambda_rec_lpips", 0.0)),
+        "lambda_depth":     float(cfg.get("lambda_depth",     0.0)),
+    }
+    asks_rec = any(w > 0 for w in rec_weights.values())
+    if not asks_rec:
+        return
+    try:
+        from model.executor.renderer import gsplat_available
+        ok = gsplat_available()
+    except Exception:
+        ok = False
+    if not ok:
+        active = ", ".join(f"{k}={v}" for k, v in rec_weights.items() if v > 0)
+        print("\n" + "=" * 70)
+        print("⚠ WARNING: reconstruction loss is configured but gsplat is unavailable")
+        print(f"  Active loss weights: {active}")
+        print(f"  → exec_out['rendered_frames'] will be None for every batch")
+        print(f"  → reconstruction_loss returns 0; rec/lpips/depth contribute NOTHING")
+        print(f"  → model trains on algebraic + InfoNCE + VQ + planner signals only")
+        print(f"  Fix: `pip install gsplat`  OR set lambda_rec*/lambda_depth=0 in loss.yaml")
+        print("=" * 70 + "\n", flush=True)
+
+
 def _setup_run_dirs(args, is_main_proc) -> Tuple[Path, Path, Path]:
     """Create out / ckpt / log dirs, snapshot configs.  Returns (out_dir, ckpt_dir, log_dir)."""
     out_dir  = Path(args.out_dir)
@@ -907,6 +944,7 @@ def main():
     args = _parse_args()
     is_ddp, rank, local_rank, device, is_main_proc = _setup_run(args)
     cfg, loss_cfg = _load_configs(args)
+    _check_renderer_sanity(loss_cfg, is_main_proc)
     out_dir, ckpt_dir, log_dir = _setup_run_dirs(args, is_main_proc)
     base_model, loss_fn, loader, sampler, val_loader = _build_model_and_data(
         args, cfg, loss_cfg, is_ddp, rank, device, is_main_proc,

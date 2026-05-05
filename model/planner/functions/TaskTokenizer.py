@@ -95,7 +95,16 @@ class _EMAVectorQuantizer(nn.Module):
             replacements = encoded[perm[:num_dead]]
 
             if replacements.size(0) < num_dead:
-                extra = encoded[torch.randint(0, encoded.size(0), (num_dead - replacements.size(0),))]
+                # IMPORTANT: device=encoded.device — without it, torch.randint
+                # defaults to CPU, indexing a CUDA tensor with a CPU index
+                # forces an implicit sync (perf hit) and warns in newer
+                # PyTorch versions.  Match the perm path above.
+                extra_idx = torch.randint(
+                    0, encoded.size(0),
+                    (num_dead - replacements.size(0),),
+                    device=encoded.device,
+                )
+                extra = encoded[extra_idx]
                 replacements = torch.cat([replacements, extra], dim=0)
 
             self.codebook.weight.data[dead] = replacements

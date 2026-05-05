@@ -121,7 +121,10 @@ class RhoParser(nn.Module):
         youngs   = F.softplus(rho[..., SLOT_YOUNGS]).unsqueeze(-1)         # [M, 1]  > 0
         poisson  = rho[..., SLOT_POISSON].sigmoid().unsqueeze(-1) * 0.499  # [M, 1]  (0, 0.499)
         density  = (F.softplus(rho[..., SLOT_DENSITY]) + 0.1).unsqueeze(-1)# [M, 1]  > 0.1
-        force    = rho[..., SLOT_FORCE]                                    # [M, 3]  unbounded
+        # Force: bound via tanh*5 to prevent codebook entries with large raw
+        # values from blowing up the simulator on the first physics-enabled
+        # step.  Range ±5 N covers typical interaction forces.
+        force    = rho[..., SLOT_FORCE].tanh() * 5.0                       # [M, 3]  bounded ±5
         friction = rho[..., SLOT_FRICTION].sigmoid().unsqueeze(-1)         # [M, 1]  [0, 1]
         damping  = rho[..., SLOT_DAMPING].sigmoid().unsqueeze(-1) * 0.5    # [M, 1]  [0, 0.5]
 

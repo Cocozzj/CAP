@@ -339,6 +339,18 @@ def train_epoch(
             )
             total = losses["total"]
 
+        # NaN diagnostic: when total is NaN, dump every per-component loss
+        # value so we can localise WHICH term blew up.  Fires only on first
+        # NaN per epoch to avoid log spam.
+        if is_main_proc and torch.isnan(total).any() and not getattr(train_epoch, "_nan_reported", False):
+            print(f"\n  ⚠ NaN detected at stage={spec.name} step={global_step} — per-component breakdown:")
+            for k, v in sorted(losses.items()):
+                if isinstance(v, torch.Tensor):
+                    val = v.item() if v.numel() == 1 else v.float().mean().item()
+                    flag = " ← NaN" if (val != val) else ""
+                    print(f"      {k:20s} = {val:+.4f}{flag}")
+            train_epoch._nan_reported = True
+
         _step(model, optimizer, scaler, total, grad_clip)
         global_step += 1
 

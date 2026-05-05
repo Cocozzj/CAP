@@ -15,7 +15,7 @@
 #
 # Optional env vars:
 #   DATASET           a (default) | b
-#   EXTRA_ARGS        forwarded verbatim to trainer (e.g. "--auto-test --batch-size 16")
+#   EXTRA_ARGS        forwarded verbatim to trainer (e.g. "--batch-size 16 --num-workers 8")
 #   TORCHRUN_NPROC    >1 → launch via torchrun for DDP
 #
 # Each seed gets its own subdirectory:  $BASE/seed_${SEED}/

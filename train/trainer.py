@@ -33,7 +33,7 @@ Multi-GPU launch (8 GPUs)::
     torchrun --nproc_per_node=8 -m train.trainer \\
         --manifest data/dataset_a/manifest.json \\
         --data-dir data/dataset_a/data \\
-        --batch-size 8 --num-workers 4 --auto-test
+        --batch-size 8 --num-workers 4
 
 Resume::
 
@@ -716,6 +716,9 @@ def _build_val_loader(args, sh_dim: int, is_main_proc: bool) -> Optional[DataLoa
         ds, batch_size=args.batch_size, shuffle=False, sampler=None,
         num_workers=args.num_workers, collate_fn=collate_batch,
         pin_memory=True, drop_last=False,
+        # Keep val workers alive across epochs (val runs every epoch by default)
+        persistent_workers=(args.num_workers > 0),
+        prefetch_factor=2,
     )
 
 
@@ -746,19 +749,13 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--T",             type=int, default=30,
                    help="frames per sample (>=10, %%5==0)")
     p.add_argument("--image-size",    type=int, default=256)
-    # Validation + auto-test
+    # Validation
     p.add_argument("--val-split", type=str, default="val",
                    help="dataset split name to use as val (default: val)")
     p.add_argument("--val-every", type=int, default=1,
                    help="run val every N epochs (default: 1 = every epoch)")
     p.add_argument("--no-val",    action="store_true",
                    help="disable val loop entirely (no best_val_*.pt tracking)")
-    p.add_argument("--auto-test", action="store_true",
-                   help="after training: load main_exp_final.pt and eval on --test-splits")
-    p.add_argument("--test-splits", type=str, nargs="+",
-                   default=["test_iid", "test_ood_unseen_pair",
-                            "test_ood_unseen_object", "test_compositional_long"],
-                   help="splits to evaluate on when --auto-test is set")
     # Reproducibility / mode
     p.add_argument("--seed",          type=int, default=0)
     p.add_argument("--deterministic", action="store_true")
@@ -866,6 +863,12 @@ def _build_model_and_data(args, cfg, loss_cfg, is_ddp, rank, device, is_main_pro
         pin_memory=True, drop_last=True,
         worker_init_fn=_seed_dataloader_worker,
         generator=torch.Generator().manual_seed(args.seed + rank * 10_000),
+        # CRITICAL: keep workers alive across epochs.  Without this, all
+        # 32 workers (num_workers × world_size) get killed and re-forked
+        # at every epoch boundary, costing 1-5 minutes of dead time per
+        # epoch on multi-GPU runs with non-trivial dataset init.
+        persistent_workers=(args.num_workers > 0),
+        prefetch_factor=2,
     )
     val_loader = _build_val_loader(args, sh_dim=sh_dim, is_main_proc=is_main_proc)
     return model, loss_fn, loader, sampler, val_loader
@@ -960,62 +963,6 @@ def _finalize(ckpt_dir, is_main_proc):
     print(f"  Last  (FULL end):  {last_link}")
 
 
-def _run_auto_test(args, base_model, ckpt_dir, out_dir, cfg, loss_cfg,
-                   device, is_main_proc, is_ddp):
-    """Load best-val checkpoint and evaluate on every test split.  Writes
-    ``test_results.json`` next to the ckpt dir.  Main rank only — others wait.
-    """
-    if is_ddp:
-        dist.barrier()
-    if not is_main_proc:
-        return
-
-    ckpt_path = ckpt_dir / "main_exp_final.pt"
-    if not ckpt_path.exists():
-        print("  ⚠ no main_exp_final.pt — skipping auto-test")
-        return
-
-    print(f"\n=== Auto-test: loading {ckpt_path.name} ===")
-    state = torch.load(ckpt_path, map_location=str(device))
-    target = base_model.module if hasattr(base_model, "module") else base_model
-    target.load_state_dict(state["model"])
-
-    # Use FULL stage's loss flags for test (matches eval-time loss composition)
-    full_spec = DEFAULT_STAGES[-1]
-    loss_fn   = CAPLoss(cfg=loss_cfg.get("loss", loss_cfg))
-    sh_dim    = cfg["gs_param"]["gs_dimension"] - 11
-
-    results: Dict[str, Any] = {
-        "checkpoint":   str(ckpt_path),
-        "loaded_from":  state.get("stage_name"),
-        "loaded_step":  state.get("global_step"),
-        "splits":       {},
-    }
-
-    for split_name in args.test_splits:
-        try:
-            ds = build_dataset(args, sh_dim=sh_dim, split=split_name)
-        except (ValueError, SystemExit) as e:
-            print(f"  skip {split_name:30s} ({e})")
-            continue
-        loader = DataLoader(
-            ds, batch_size=args.batch_size, shuffle=False, sampler=None,
-            num_workers=args.num_workers, collate_fn=collate_batch,
-            pin_memory=True, drop_last=False,
-        )
-        # stage_step=total_iters → anneal frac=1 → full-strength loss weights
-        val_loss = run_val(
-            target, loader, loss_fn, full_spec, device,
-            stage_step=1, total_iters=1,
-        )
-        results["splits"][split_name] = {"loss": val_loss, "n": len(ds)}
-        print(f"  {split_name:30s}  loss={val_loss:.4f}  n={len(ds)}")
-
-    out_path = out_dir / "test_results.json"
-    out_path.write_text(json.dumps(results, indent=2))
-    print(f"  ✓ saved {out_path}")
-
-
 def main():
     args = _parse_args()
     is_ddp, rank, local_rank, device, is_main_proc = _setup_run(args)
@@ -1057,9 +1004,6 @@ def main():
         )
 
     _finalize(ckpt_dir, is_main_proc)
-    if args.auto_test:
-        _run_auto_test(args, base_model, ckpt_dir, out_dir, cfg, loss_cfg,
-                       device, is_main_proc, is_ddp)
     cleanup_ddp()
 
 

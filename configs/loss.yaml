@@ -26,7 +26,10 @@ loss:
   lambda_planner_ce:      1.0       # AR cross-entropy
   lambda_hier:            0.2       # hierarchical consistency (PDF unspecified)
   # E. Regularization
-  lambda_lip:             0.1
+  lambda_lip:             0.01    # was 0.1; reduced 10× because L_Lip blew up
+                                  # to ~242 in PHYSICS first step (target_C=2),
+                                  # gradient explosion through vfield's spectral_norm
+                                  # → NaN params.  Re-raise once vfield stable.
   lip_target_C:           2.0
   lip_epsilon:            0.01
   lambda_entropy:         0.05      # codebook entropy — Stage-2 only

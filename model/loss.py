@@ -93,7 +93,7 @@ DEFAULT_LOSS_CFG: Dict[str, Any] = {
     "lambda_hier":          0.2,
 
     # E. Regularisation
-    "lambda_lip":           0.1,
+    "lambda_lip":           0.01,    # see configs/loss.yaml comment for rationale
     "lip_target_C":         2.0,
     "lip_epsilon":          0.01,
     "lambda_entropy":       0.05,

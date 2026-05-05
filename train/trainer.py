@@ -239,12 +239,28 @@ def build_optimizer(model: nn.Module, lr: float) -> torch.optim.Optimizer:
 # ══════════════════════════════════════════════════════════════════════
 
 def _step(model, optimizer, scaler, total, grad_clip):
-    """Backward + grad-clip + optimizer step.  AMP-aware (single path)."""
+    """Backward + grad-clip + optimizer step.  AMP-aware (single path).
+
+    Guards against NaN/Inf gradients (from e.g. spectral_norm power iteration
+    instabilities or lipschitz hinge gradient explosions): any non-finite
+    grad on a trainable param is replaced with 0 BEFORE clip_grad_norm and
+    optimizer.step.  Without this, NaN grads silently corrupt parameters
+    permanently — clip_grad_norm doesn't fix NaN (NaN * anything = NaN).
+    """
     if scaler is not None:
         scaler.scale(total).backward()
         scaler.unscale_(optimizer)
     else:
         total.backward()
+
+    # Sanitize per-param grads: NaN → 0, ±Inf → 0.  If a whole param's grad
+    # is non-finite, that param effectively skips this step (zero update).
+    n_bad = 0
+    for p in model.parameters():
+        if p.grad is not None and not torch.isfinite(p.grad).all():
+            n_bad += int((~torch.isfinite(p.grad)).sum().item())
+            torch.nan_to_num_(p.grad, nan=0.0, posinf=0.0, neginf=0.0)
+
     torch.nn.utils.clip_grad_norm_(
         [p for p in model.parameters() if p.requires_grad], max_norm=grad_clip,
     )

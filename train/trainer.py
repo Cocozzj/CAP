@@ -436,13 +436,19 @@ def run_val(
     stage_step: int,
     total_iters: int,
     tau:        float = 0.1,
+    is_ddp:     bool = False,
 ) -> float:
     """Compute mean per-sample val loss using ``spec.loss`` (same anneal state
-    as train at this point).  Called from main rank only — bypasses DDP wrapper
-    by calling ``base_model`` directly.
+    as train at this point).  Called by **all ranks** under DDP — each rank
+    forwards through its shard (via DistributedSampler), then ``all_reduce``
+    sums (loss×N, N) globally to produce a single mean across all ranks.
 
     Returns total loss averaged per sample (NOT per batch).  Always uses
     ``sample_prob=0`` (pure teacher forcing) for a stable measurement.
+
+    Note on ``base_model``: every rank passes its own ``model.module``.  Forward
+    is local (no DDP gradient sync) since we don't call backward.  Per-submodule
+    train/eval state restoration is symmetric across ranks → no asymmetric state.
     """
     # Snapshot per-submodule train/eval state so we can restore after val.
     # We can't just toggle base_model.train()/eval() because some submodules
@@ -491,6 +497,17 @@ def run_val(
     for n, m in base_model.named_modules():
         if n in saved_modes:
             m.training = saved_modes[n]
+
+    # Cross-rank reduction: sum (loss×N, N) globally so every rank ends up
+    # with the same global mean.  Tensor on the model's device — all_reduce
+    # uses NCCL on GPU when init'd with backend="nccl".
+    if is_ddp:
+        agg = torch.tensor(
+            [total_sum, float(n_samples)], dtype=torch.float64, device=device,
+        )
+        dist.all_reduce(agg, op=dist.ReduceOp.SUM)
+        total_sum = float(agg[0].item())
+        n_samples = int(agg[1].item())
     return total_sum / max(n_samples, 1)
 
 
@@ -572,6 +589,7 @@ def run_stage(
     loader:       DataLoader,
     sampler:      Optional[DistributedSampler],
     val_loader:   Optional[DataLoader],                   # best-val tracking (None → off)
+    val_sampler:  Optional[DistributedSampler],           # epoch-deterministic val shuffle
     val_every:    int,
     device:       torch.device,
     ckpt_dir:     Path,
@@ -633,31 +651,38 @@ def run_stage(
                 prune_checkpoints(ckpt_dir, keep_last=keep_last)
                 print(f"  ✔ saved {p.name}")
 
-        # ── Validation pass: rank 0 has val_loader, ranks 1-7 have None ──
-        # The barrier MUST be unconditional (every rank reaches it every
-        # epoch), otherwise rank 0 deadlocks alone while others race ahead.
+        # ── Validation: ALL ranks participate (DistributedSampler shards) ──
+        # run_val internally calls dist.all_reduce to combine per-rank losses,
+        # so every rank ends up with the same global val_loss.  No barrier
+        # needed — the all_reduce is the sync point.  No asymmetric state.
         should_val = ((epoch + 1) % val_every == 0)
-        if is_main_proc and val_loader is not None and should_val:
+        if val_loader is not None and should_val:
+            # Make val sharding deterministic across epochs (matches PyTorch
+            # convention even when shuffle=False — some impls use the seed).
+            if val_sampler is not None:
+                val_sampler.set_epoch(epoch)
             stage_step = global_step - stage_start_global_step
             val_loss = run_val(
                 base_model, val_loader, loss_fn, spec, device,
                 stage_step=stage_step, total_iters=total_iters,
+                is_ddp=is_ddp,
             )
-            print(f"  val_loss={val_loss:.4f}  (best={min(best_val, val_loss):.4f})",
-                  flush=True)
-            if writer is not None:
-                writer.add_scalar("val/total", val_loss, global_step)
-            if val_loss < best_val:
-                best_val = val_loss
-                save_checkpoint(
-                    best_val_path, model, optimizer, scaler,
-                    stage_name=spec.name, epoch=epoch + 1,
-                    global_step=global_step,
-                    extra={"val_loss": val_loss, "best_val": True},
-                )
-                print(f"  ✨ new best → {best_val_path.name}")
-        if is_ddp and should_val:
-            dist.barrier()   # all ranks sync; non-main ranks pass through immediately
+            # Only rank 0 prints / writes / saves best — but val_loss is the
+            # SAME on every rank thanks to all_reduce.
+            if is_main_proc:
+                print(f"  val_loss={val_loss:.4f}  (best={min(best_val, val_loss):.4f})",
+                      flush=True)
+                if writer is not None:
+                    writer.add_scalar("val/total", val_loss, global_step)
+                if val_loss < best_val:
+                    best_val = val_loss
+                    save_checkpoint(
+                        best_val_path, model, optimizer, scaler,
+                        stage_name=spec.name, epoch=epoch + 1,
+                        global_step=global_step,
+                        extra={"val_loss": val_loss, "best_val": True},
+                    )
+                    print(f"  ✨ new best → {best_val_path.name}", flush=True)
 
     if is_main_proc:
         p = ckpt_dir / f"stage_{spec.name.lower()}_done.pt"
@@ -698,39 +723,53 @@ def build_dataset(args, sh_dim: int, *, split: Optional[str] = None):
     )
 
 
-def _build_val_loader(args, sh_dim: int, is_main_proc: bool) -> Optional[DataLoader]:
-    """Build val DataLoader on rank 0 only — other ranks return None and skip
-    the val block entirely (see run_stage).
+def _build_val_loader(
+    args, sh_dim: int, is_main_proc: bool, is_ddp: bool, rank: int,
+) -> Tuple[Optional[DataLoader], Optional[DistributedSampler]]:
+    """Build val DataLoader using **standard DDP all-rank pattern**.
 
-    KEY FIX: val_loader uses ``num_workers=0`` to load batches directly in the
-    main process instead of fork()-ing worker subprocesses.  Without this, rank
-    0 hangs in ``do_wait`` waiting for dataloader children to spawn at the
-    first val iteration, while ranks 1-7 spin at NCCL barrier (100% util,
-    waiting for rank 0 to reach the same barrier).  The val set is small (~180
-    samples) and inference is fast, so single-process loading costs ~10s — far
-    less than the broken multi-worker path's deadlock.
+    Why all-rank instead of rank-0-only?  Rank-0-only val creates asymmetric
+    state between ranks (rank 0 forwards through the model with eval-mode
+    submodules; ranks 1-7 idle at a barrier).  In some NCCL/CUDA driver
+    combinations (notably H100 + RunPod docker), the dist.barrier() call
+    after rank-0 val deadlocks — rank 0 never reaches the barrier kernel
+    while ranks 1-7 spin at 100% GPU util waiting.
 
-    Returns None if ``--no-val``, if the val split doesn't exist, or if this
-    is not the main rank.
+    Symmetric DDP val avoids this entirely:
+      - DistributedSampler shards val across all ranks (~22 samples/rank for 180 total)
+      - Every rank forwards through model.module (no DDP grad sync needed)
+      - dist.all_reduce sums the per-rank losses → global mean
+
+    Returns (loader, sampler).  Both are None if ``--no-val`` or split missing.
+    Sampler is None in single-GPU mode.
     """
     if args.no_val:
-        return None
-    # Only rank 0 builds the val loader.  Other ranks pass through the val
-    # block in run_stage without doing anything (val_loader is None for them).
-    if not is_main_proc:
-        return None
+        return None, None
     try:
         ds = build_dataset(args, sh_dim=sh_dim, split=args.val_split)
     except (ValueError, SystemExit) as e:
-        print(f"⚠ val split {args.val_split!r} unavailable ({e}) — best-val tracking disabled")
-        return None
-    print(f"Val:     {args.val_split!r}  ({len(ds)} samples)")
-    return DataLoader(
-        ds, batch_size=args.batch_size, shuffle=False, sampler=None,
-        num_workers=0,  # CRITICAL: 0 → no worker fork → no do_wait deadlock
+        if is_main_proc:
+            print(f"⚠ val split {args.val_split!r} unavailable ({e}) — best-val tracking disabled")
+        return None, None
+    if is_main_proc:
+        print(f"Val:     {args.val_split!r}  ({len(ds)} samples)")
+
+    # DistributedSampler: shuffle=False keeps eval deterministic; drop_last=False
+    # so we don't lose the tail samples (any rank may pad with duplicates).
+    val_sampler = (
+        DistributedSampler(ds, shuffle=False, drop_last=False, seed=args.seed)
+        if is_ddp else None
+    )
+    val_loader = DataLoader(
+        ds, batch_size=args.batch_size, shuffle=False, sampler=val_sampler,
+        # num_workers=0 here is intentional: val runs every epoch and we don't
+        # want to pay worker-fork cost.  Single-process loading on ~22
+        # samples/rank takes ~3s, negligible compared to forward time.
+        num_workers=0,
         collate_fn=collate_batch,
         pin_memory=True, drop_last=False,
     )
+    return val_loader, val_sampler
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -881,8 +920,10 @@ def _build_model_and_data(args, cfg, loss_cfg, is_ddp, rank, device, is_main_pro
         persistent_workers=(args.num_workers > 0),
         prefetch_factor=2,
     )
-    val_loader = _build_val_loader(args, sh_dim=sh_dim, is_main_proc=is_main_proc)
-    return model, loss_fn, loader, sampler, val_loader
+    val_loader, val_sampler = _build_val_loader(
+        args, sh_dim=sh_dim, is_main_proc=is_main_proc, is_ddp=is_ddp, rank=rank,
+    )
+    return model, loss_fn, loader, sampler, val_loader, val_sampler
 
 
 def _resolve_resume(
@@ -980,7 +1021,7 @@ def main():
     cfg, loss_cfg = _load_configs(args)
     _check_renderer_sanity(loss_cfg, is_main_proc)
     out_dir, ckpt_dir, log_dir = _setup_run_dirs(args, is_main_proc)
-    base_model, loss_fn, loader, sampler, val_loader = _build_model_and_data(
+    base_model, loss_fn, loader, sampler, val_loader, val_sampler = _build_model_and_data(
         args, cfg, loss_cfg, is_ddp, rank, device, is_main_proc,
     )
 
@@ -1001,7 +1042,7 @@ def main():
         global_step = run_stage(
             spec=spec, base_model=base_model, loss_fn=loss_fn,
             loader=loader, sampler=sampler,
-            val_loader=val_loader, val_every=args.val_every,
+            val_loader=val_loader, val_sampler=val_sampler, val_every=args.val_every,
             device=device, ckpt_dir=ckpt_dir, log_dir=log_dir,
             use_amp=(not args.no_amp), grad_clip=args.grad_clip,
             save_every=args.save_every, keep_last=args.keep_last,

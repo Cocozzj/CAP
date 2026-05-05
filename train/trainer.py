@@ -53,6 +53,7 @@ import random
 import shutil
 import time
 import warnings
+from dataclasses import replace as dc_replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -821,6 +822,10 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--deterministic", action="store_true")
     p.add_argument("--smoke",         action="store_true",
                    help="1 epoch / stage, same lr — local pipeline test")
+    p.add_argument("--max-epochs",    type=int, default=None,
+                   help="Cap each stage's epoch count at this value (useful for "
+                        "mini sanity-runs without editing stages.py).  Composes "
+                        "with --smoke: whichever is smaller wins per stage.")
     p.add_argument("--stages-preset", type=str, default="a",
                    choices=["a", "b"],
                    help="a = DEFAULT_STAGES (4-stage curriculum, 150ep, for Dataset-A), "
@@ -1089,6 +1094,21 @@ def main():
         stage_schedule = SMOKE_STAGES if args.smoke else DEFAULT_STAGES
         if args.smoke and is_main_proc:
             print("⚡ SMOKE mode: 1 epoch per stage")
+
+    # --max-epochs: cap per-stage epoch count for mini sanity-runs.
+    # Implemented AFTER smoke selection so it composes naturally — if both are
+    # set, each stage gets min(smoke_epochs=1, max_epochs).  Uses dataclasses.replace
+    # to avoid mutating the module-level *_STAGES lists (would leak across
+    # repeated trainer calls in the same process, e.g. notebook usage).
+    if args.max_epochs is not None and args.max_epochs > 0:
+        capped = []
+        for s in stage_schedule:
+            new_epochs = min(s.epochs, args.max_epochs)
+            capped.append(s if new_epochs == s.epochs else dc_replace(s, epochs=new_epochs))
+        stage_schedule = capped
+        if is_main_proc:
+            print(f"⏱  --max-epochs={args.max_epochs}: "
+                  f"per-stage epochs = {[s.epochs for s in stage_schedule]}")
 
     # P2-5: Gumbel-softmax temperature anneal config (yaml: training.tau_schedule)
     tau_schedule = (loss_cfg.get("training", {}) or {}).get("tau_schedule")

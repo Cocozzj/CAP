@@ -150,6 +150,26 @@ def _run_physgaussian_one(
     except Exception as e:
         return False, f"failed to pad PLY to sh_degree=3: {e}"
 
+    # gs_simulation.py's get_camera_view() unconditionally opens
+    # ``model_path/cameras.json`` even when --render_img is off (the
+    # rasterizer is built every frame inside the main loop).  With
+    # default_camera_index=-1 (our config), only width/height/fx/fy
+    # come from this file — position/rotation are overridden from
+    # init_azimuthm/elevation/radius.  Write a minimal one-camera entry.
+    cameras_json = model_dir / "cameras.json"
+    cameras_json.write_text(json.dumps([{
+        "id":       0,
+        "img_name": "synth_view",
+        "width":    256,           # small → cheap rasterize per frame
+        "height":   256,
+        "position": [0.0, 0.0, 4.0],          # overridden
+        "rotation": [[1.0, 0.0, 0.0],          # overridden
+                     [0.0, 1.0, 0.0],
+                     [0.0, 0.0, 1.0]],
+        "fx":       256.0,
+        "fy":       256.0,
+    }], indent=2))
+
     cmd = [
         "python", str(physgs_repo / "gs_simulation.py"),
         "--model_path",  str(model_dir.resolve()),

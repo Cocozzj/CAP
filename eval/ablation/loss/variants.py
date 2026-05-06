@@ -15,9 +15,10 @@ VARIANTS: Dict[str, Dict[str, Any]] = {
 
     "no_L_clos": {
         "description":
-            "Drop closure loss alone (keep inverse / equiv / commutator). "
-            "Tests whether closure error per se drives downstream metrics or "
-            "if it's redundant with inverse.",
+            "Drop closure loss alone (Theorem 1: closure error bound). "
+            "Tests whether L_clos is the term that empirically enforces the "
+            "K^{-1/d} closure-error scaling — closure_gap should rise sharply "
+            "while inverse_gap and other metrics stay closer to baseline.",
         "config_overrides": {},
         "loss_overrides":   {"loss.lambda_clos": 0.0},
         "trainer_flags":    [],
@@ -25,10 +26,25 @@ VARIANTS: Dict[str, Dict[str, Any]] = {
 
     "no_L_inv": {
         "description":
-            "Drop inverse loss alone. Closure / equivariance still pull toward "
-            "group structure; isolates the unique contribution of L_inv.",
+            "Drop inverse loss alone (Theorem 2: inverse consistency bound). "
+            "Closure / equivariance still pull toward group structure; "
+            "isolates the unique contribution of L_inv to the inverse_gap.",
         "config_overrides": {},
         "loss_overrides":   {"loss.lambda_inv": 0.0},
+        "trainer_flags":    [],
+    },
+
+    "no_L_eq": {
+        "description":
+            "Drop equivariance loss alone (Proposition 3: cross-object "
+            "equivariance bound).  Closure / inverse / commutator still "
+            "active; tests whether SE(3)-equivariance training is the "
+            "specific term that drives cross-object transfer accuracy.",
+        "config_overrides": {},
+        "loss_overrides":   {
+            "loss.lambda_eq":       0.0,
+            "loss.lambda_eq_cross": 0.0,
+        },
         "trainer_flags":    [],
     },
 
@@ -47,9 +63,11 @@ VARIANTS: Dict[str, Dict[str, Any]] = {
 
     "no_L_hier": {
         "description":
-            "Drop hierarchical consistency loss; task-tokens still exist but "
-            "no explicit penalty enforces task↔atomic alignment beyond CVAE "
-            "training. Justifies the extra L_hier term.",
+            "Drop hierarchical consistency loss (Proposition 4: hierarchical "
+            "algebraic error bound).  Task-tokens still exist but no explicit "
+            "penalty enforces task↔atomic alignment beyond CVAE training. "
+            "Tests whether L_hier is the specific term that bounds the "
+            "decomposition error between task and atomic levels.",
         "config_overrides": {},
         "loss_overrides":   {"loss.lambda_hier": 0.0},
         "trainer_flags":    [],
@@ -57,9 +75,11 @@ VARIANTS: Dict[str, Dict[str, Any]] = {
 
     "no_L_nce": {
         "description":
-            "Drop InfoNCE alignment of task ↔ text. Task token still trained "
-            "via VQ + CVAE recon, but no contrastive signal to text labels. "
-            "Tests Proposition 5 (语法语义一致性).",
+            "Drop InfoNCE alignment of task ↔ text (Proposition 5: semantic "
+            "coherence).  Task token still trained via VQ + CVAE recon, but "
+            "no contrastive signal to text labels.  Tests whether removing "
+            "the lower-bound on I(c_task; verb) breaks text-conditional "
+            "generation correctness.",
         "config_overrides": {},
         "loss_overrides":   {"loss.lambda_nce": 0.0},
         "trainer_flags":    [],

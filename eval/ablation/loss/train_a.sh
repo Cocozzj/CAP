@@ -9,10 +9,21 @@
 
 set -euo pipefail
 
-VARIANTS="${VARIANTS:-no_L_clos no_L_inv no_L_comm no_L_hier no_L_nce no_kl_anneal}"
+# Default 5 theorem-aligned variants (one per theorem/proposition):
+#   no_L_clos  → Theorem 1 (closure error bound)
+#   no_L_inv   → Theorem 2 (inverse consistency bound)
+#   no_L_eq    → Proposition 3 (cross-object equivariance)
+#   no_L_hier  → Proposition 4 (hierarchical algebraic error)
+#   no_L_nce   → Proposition 5 (semantic coherence)
+# Excluded by default: no_L_comm (commutator is "soft prior" per loss.py
+# docstring, not a theorem) and no_kl_anneal (CVAE schedule, paper-irrelevant).
+# To run them explicitly:
+#   VARIANTS="no_L_clos no_L_inv no_L_eq no_L_hier no_L_nce no_L_comm no_kl_anneal" \
+#       bash eval/ablation/loss/train_a.sh
+VARIANTS="${VARIANTS:-no_L_clos no_L_inv no_L_eq no_L_hier no_L_nce}"
 SEED="${SEED:-0}"
-# Per-stage epochs for ablation: 25/20/20/35 = 100 total (vs main 35/35/25/55=150).
-STAGE_EPOCHS="${STAGE_EPOCHS:-25 20 20 35}"
+# Per-stage epochs: 20/15/15/25 = 75 total (matches module ablation).
+STAGE_EPOCHS="${STAGE_EPOCHS:-20 15 15 25}"
 MAX_EPOCHS="${MAX_EPOCHS:-}"          # empty by default; mutually exclusive with STAGE_EPOCHS
 BATCH_SIZE="${BATCH_SIZE:-8}"
 NUM_WORKERS="${NUM_WORKERS:-4}"

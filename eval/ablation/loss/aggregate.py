@@ -113,7 +113,11 @@ def main() -> None:
     p.add_argument("--run-root",  type=str, default="runs/loss")
     p.add_argument("--main-root", type=str, default="runs/loss/_main")
     p.add_argument("--seed",      type=int, default=0)
-    p.add_argument("--variants",  nargs="+", default=variants_mod.list_variants())
+    # Default: the 5 theorem-aligned variants (Theorem 1 / 2 / Prop 3 / 4 / 5).
+    p.add_argument("--variants",  nargs="+",
+                   default=["no_L_clos", "no_L_inv", "no_L_eq", "no_L_hier", "no_L_nce"],
+                   help=f"Variant names to include (default: 5 theorem-aligned; "
+                        f"all available: {variants_mod.list_variants()}).")
     p.add_argument("--out-dir",   type=str, default="runs/loss/_aggregate")
     p.add_argument("--main-seeds", nargs="+", type=int, default=[0, 1, 2],
                    help="default: 0 1 2 → mean±std for main row")

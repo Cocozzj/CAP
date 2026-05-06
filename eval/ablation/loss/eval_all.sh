@@ -7,7 +7,8 @@
 
 set -euo pipefail
 
-VARIANTS="${VARIANTS:-no_L_clos no_L_inv no_L_comm no_L_hier no_L_nce no_kl_anneal}"
+# Default matches train_a.sh — eval the 5 theorem-aligned variants.
+VARIANTS="${VARIANTS:-no_L_clos no_L_inv no_L_eq no_L_hier no_L_nce}"
 SEED="${SEED:-0}"
 RUN_ROOT="${RUN_ROOT:-runs/loss}"
 

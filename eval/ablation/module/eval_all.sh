@@ -15,7 +15,9 @@
 
 set -euo pipefail
 
-VARIANTS="${VARIANTS:-no_hier no_algebraic no_cvae no_physics no_equivariance no_lipschitz}"
+# Default matches train_a.sh — eval the 4 paper-critical variants.
+# To eval all 6, override: VARIANTS="no_hier no_algebraic no_cvae no_physics no_equivariance no_lipschitz"
+VARIANTS="${VARIANTS:-no_algebraic no_physics no_hier no_cvae}"
 SEED="${SEED:-0}"
 RUN_ROOT="${RUN_ROOT:-runs/module}"
 

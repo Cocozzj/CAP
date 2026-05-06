@@ -207,7 +207,12 @@ def main() -> None:
     p.add_argument("--run-root",  type=str, default="runs/module")
     p.add_argument("--main-root", type=str, default="runs/module/_main")
     p.add_argument("--seed",      type=int, default=0)
-    p.add_argument("--variants",  nargs="+", default=variants_mod.list_variants())
+    # Default to the 4 paper-critical variants; pass --variants to override
+    # (use ``variants_mod.list_variants()`` for the full 6-variant set).
+    p.add_argument("--variants",  nargs="+",
+                   default=["no_algebraic", "no_physics", "no_hier", "no_cvae"],
+                   help="Variant names to include in Tab 6 (default: 4 critical; "
+                        f"all available: {variants_mod.list_variants()}).")
     p.add_argument("--out-dir",   type=str, default="runs/module/_aggregate")
     p.add_argument("--datasets",  nargs="+", default=["a"], choices=["a", "b"],
                    help="Which dataset halves to include (default: A only). "

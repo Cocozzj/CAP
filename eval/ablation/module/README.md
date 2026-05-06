@@ -1,20 +1,33 @@
 # Module-level ablations (Tier 1)
 
-> 6 个模块消融，**只在 Dataset-A 上跑**，最后聚合成 Tab 6。
+> **默认跑 4 个 paper-critical 变体**（从 6 个里 cherry-pick），只在 Dataset-A 上跑，最后聚合成 Tab 6。
 > 论文映射：PDF §5.2 / Act4D MD §3.A / Experiment.md §2.B Tier 1。
 
-## 6 个变体（在 `variants.py` 单点定义）
+## 6 个变体（全部在 `variants.py` 定义，**默认只跑前 4 个**）
 
-| 变体名 | 移除什么 | 主要 yaml/CLI 改动 |
-|---|---|---|
-| `no_hier` | TaskTokenizer / 任务码本 | `planner.use_task_token: false` |
-| `no_algebraic` | clos / inv / eq / comm 全部 loss | 5 个 lambda 置 0 |
-| `no_cvae` | CVAE 训练 + 采样多样性 | `deterministic: true` + cvae lambda 置 0 |
-| `no_physics` | 整个物理插件（DeformSim）| `--no-physics` CLI（trainer.py 新增）|
-| `no_equivariance` | SE(3) 等变 loss | `lambda_eq = lambda_eq_cross = 0` |
-| `no_lipschitz` | spectral-norm 正则的 loss 项 | `lambda_lip = 0` |
+| 变体名 | 移除什么 | 默认跑？ | 主要 yaml/CLI 改动 |
+|---|---|---|---|
+| `no_algebraic` | clos / inv / eq / comm 全部 loss | ✅ | 5 个 lambda 置 0（**核心消融**）|
+| `no_physics` | 整个物理插件（DeformSim）| ✅ | `--no-physics` CLI |
+| `no_hier` | TaskTokenizer / 任务码本 | ✅ | `planner.use_task_token: false` |
+| `no_cvae` | CVAE 训练 + 采样多样性 | ✅ | `deterministic: true` + cvae lambda 置 0 |
+| `no_equivariance` | SE(3) 等变 loss | ⏸️ | `lambda_eq = lambda_eq_cross = 0` |
+| `no_lipschitz` | spectral-norm 正则的 loss 项 | ⏸️ | `lambda_lip = 0` |
 
-每个变体 A 训 **100 epoch 总**（默认 `STAGE_EPOCHS="25 20 20 35"`，对应 RIGID/PLANNER/PHYSICS/FULL；main 是 150 ep / 35-35-25-55）。**不在 B 上 fine-tune**——消融对象是架构 / loss 设计，dataset-agnostic。
+跑全部 6 个：
+
+```bash
+VARIANTS="no_hier no_algebraic no_cvae no_physics no_equivariance no_lipschitz" \
+    bash eval/ablation/module/train_a.sh
+```
+
+每个变体 A 训 **75 epoch 总**（默认 `STAGE_EPOCHS="20 15 15 25"`，对应 RIGID/PLANNER/PHYSICS/FULL；main 是 150 ep / 35-35-25-55）。**不在 B 上 fine-tune**——消融对象是架构 / loss 设计，dataset-agnostic。
+
+砍 `no_equivariance` / `no_lipschitz` 的理由：
+- `no_equivariance` 已被 `no_algebraic` 包含（`lambda_eq=0` 是 algebraic 的子集）
+- `no_lipschitz` 信号小（spectral_norm wrap 仍然在 vfield 里，loss 项消融 effect 弱）
+
+如果 reviewer 问到，rebuttal 阶段再补这两个。
 
 ## 文件清单
 
@@ -65,11 +78,13 @@ VARIANTS="no_lipschitz" MAX_EPOCHS=2 \
 
 ## 总成本估算（8×H100 sequential）
 
-| 阶段 | 单 variant | × 6 variants | 总 |
+| 阶段 | 单 variant | × 4 variants | 总 |
 |---|---|---|---|
-| Train A (100 ep, 默认) | ~1.3 h | 8 h | **8 h** |
-| Eval (4 项 × A) | ~10 min | 1 h | **1 h** |
-| **TOTAL** | | | **~9 GPU·h ≈ 0.4 wall-clock 天** |
+| Train A (75 ep, 默认) | ~1.07 h (~64 min) | 4.3 h | **4.3 h** |
+| Eval (4 项 × A) | ~10 min | 40 min | **0.7 h** |
+| **TOTAL** | | | **~5 GPU·h ≈ 5 wall-clock 小时** |
+
+跑 6 个 variant + 100 ep（更完整版本，对比用）≈ ~9 GPU·h。
 
 并行说一下：6 个 A train 互不依赖，可以**多机并行**或**1×H100/seed 跑 6 个**（batch 减小到 2-4）。但 sequential 更稳，1.3 天等得起。
 

@@ -14,11 +14,16 @@
 set -euo pipefail
 
 # ─── Configurable knobs ─────────────────────────────────────────────────
-VARIANTS="${VARIANTS:-no_hier no_algebraic no_cvae no_physics no_equivariance no_lipschitz}"
+# Default 4 paper-critical variants (NeurIPS Tab 6).  All 6 still defined in
+# variants.py — to run all 6 use:
+#   VARIANTS="no_hier no_algebraic no_cvae no_physics no_equivariance no_lipschitz" \
+#       bash eval/ablation/module/train_a.sh
+VARIANTS="${VARIANTS:-no_algebraic no_physics no_hier no_cvae}"
 SEED="${SEED:-0}"
-# Per-stage epochs for ablation: 25/20/20/35 = 100 total (vs main 35/35/25/55=150).
-# Preserves curriculum shape: FULL stays the largest stage.
-STAGE_EPOCHS="${STAGE_EPOCHS:-25 20 20 35}"
+# Per-stage epochs: 20/15/15/25 = 75 total (vs main 35/35/25/55=150).
+# Preserves curriculum shape (FULL stays largest); ~4.5 h wallclock for 4
+# variants on 8×H100.  Override via STAGE_EPOCHS="..." or set MAX_EPOCHS=N.
+STAGE_EPOCHS="${STAGE_EPOCHS:-20 15 15 25}"
 MAX_EPOCHS="${MAX_EPOCHS:-}"          # empty by default; mutually exclusive with STAGE_EPOCHS
 BATCH_SIZE="${BATCH_SIZE:-8}"
 NUM_WORKERS="${NUM_WORKERS:-4}"

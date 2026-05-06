@@ -150,7 +150,7 @@ def _patch_physgs_config(orig_path: Path, dst_path: Path, xform: dict) -> None:
             "point":      [target_center[0], target_center[1], floor_z],
             "normal":     [0.0, 0.0, 1.0],
             "surface":    "sticky",
-            "friction":   0.5,
+            "friction":   0.0,    # PhysGaussian asserts friction==0 for sticky
             "start_time": 0,
             "end_time":   1000.0,
         },

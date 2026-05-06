@@ -81,9 +81,9 @@ for V in $VARIANTS; do
 done
 
 # ─── Main model on 3 seeds for mean±std baseline ──────────────────────
-# Ablations use 1 seed per the standard protocol (Act4D MD: "主表 3 seeds，
-# 其他 1 seed").  The main row in Tab 6 averages the 3 pre-trained main
-# seeds at runs/main_a/seed_{0,1,2}/.
+# Main was trained 3 seeds (runs/main_a/seed_{0,1,2}/) — use all 3 here so
+# the Tab 6 main row reports mean ± std.  Ablations stay at 1 seed (per
+# Act4D MD: "主表 3 seeds, 其他 1 seed").
 MAIN_SEEDS="${MAIN_SEEDS:-0 1 2}"
 MAIN_OUT="${MAIN_OUT:-runs/module/_main}"
 

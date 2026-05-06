@@ -75,6 +75,7 @@ def collect(eval_a_dir: Path) -> Dict[str, Any]:
 
 
 def _aggregate_seeds(seed_dirs: List[Path]) -> Dict[str, Any]:
+    """1 seed → scalar; ≥ 2 seeds → (mean, std)."""
     per_seed = [collect(d) for d in seed_dirs if d.exists()]
     if not per_seed:
         return {col: None for _, _, col in METRICS}
@@ -82,7 +83,7 @@ def _aggregate_seeds(seed_dirs: List[Path]) -> Dict[str, Any]:
     for _, _, col in METRICS:
         vals = [r[col] for r in per_seed if isinstance(r.get(col), (int, float))]
         if not vals:                  out[col] = None
-        elif len(vals) == 1:          out[col] = (vals[0], 0.0)
+        elif len(vals) == 1:          out[col] = vals[0]
         else:
             mean = sum(vals) / len(vals)
             var  = sum((v - mean) ** 2 for v in vals) / (len(vals) - 1)
@@ -94,12 +95,12 @@ def build_rows(run_root: Path, main_root: Path, seed: int,
                variants: List[str], main_seeds: List[int] = (0, 1, 2),
                ) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
-    # main: aggregate over 3 seeds
+    # main: 1 seed → bare "main"; ≥2 seeds → "main (n=N)"
     seed_dirs = [main_root / f"seed_{ms}" / "eval_a" for ms in main_seeds]
     existing  = [d for d in seed_dirs if d.exists()]
     if existing:
-        rows.append({"variant": f"main (n={len(existing)})",
-                     **_aggregate_seeds(existing)})
+        label = "main" if len(existing) == 1 else f"main (n={len(existing)})"
+        rows.append({"variant": label, **_aggregate_seeds(existing)})
     # ablations: single seed
     for v in variants:
         rows.append({"variant": v,
@@ -114,7 +115,8 @@ def main() -> None:
     p.add_argument("--seed",      type=int, default=0)
     p.add_argument("--variants",  nargs="+", default=variants_mod.list_variants())
     p.add_argument("--out-dir",   type=str, default="runs/loss/_aggregate")
-    p.add_argument("--main-seeds", nargs="+", type=int, default=[0, 1, 2])
+    p.add_argument("--main-seeds", nargs="+", type=int, default=[0, 1, 2],
+                   help="default: 0 1 2 → mean±std for main row")
     args = p.parse_args()
 
     out_dir = Path(args.out_dir)

@@ -98,7 +98,11 @@ def _fmt_num(x: float) -> str:
 
 
 def _aggregate_seeds(seed_dirs: List[Path]) -> Dict[str, Any]:
-    """Pull metrics from each seed's eval_<ds> dir, return {col: (mean, std)}."""
+    """Pull metrics from each seed's eval_<ds> dir.
+
+    Returns {col: scalar} when only 1 seed is available (no std to display);
+    {col: (mean, std)} when ≥ 2 seeds were eval'd.
+    """
     per_seed: List[Dict[str, Any]] = [collect_one(d) for d in seed_dirs if d.exists()]
     if not per_seed:
         return {col: None for _, _, col in METRICS}
@@ -108,7 +112,7 @@ def _aggregate_seeds(seed_dirs: List[Path]) -> Dict[str, Any]:
         if not vals:
             out[col] = None
         elif len(vals) == 1:
-            out[col] = (vals[0], 0.0)
+            out[col] = vals[0]                   # bare scalar, no "± 0.0"
         else:
             mean = sum(vals) / len(vals)
             var  = sum((v - mean) ** 2 for v in vals) / (len(vals) - 1)
@@ -139,13 +143,14 @@ def build_rows(
     """
     rows: List[Dict[str, Any]] = []
 
-    # ── Main row: aggregate over 3 seeds ────────────────────────────
+    # ── Main row: aggregate over main_seeds (1 → scalar; ≥2 → mean±std) ──
     for ds in datasets:
         seed_dirs = [main_root / f"seed_{ms}" / f"eval_{ds}" for ms in main_seeds]
         existing  = [d for d in seed_dirs if d.exists()]
         if not existing:
             continue
-        row = {"variant": f"main (n={len(existing)})", "dataset": ds,
+        label = "main" if len(existing) == 1 else f"main (n={len(existing)})"
+        row = {"variant": label, "dataset": ds,
                **_aggregate_seeds(existing)}
         rows.append(row)
 
@@ -209,7 +214,7 @@ def main() -> None:
                         "Pass --datasets a b if you've also run B fine-tunes.")
     p.add_argument("--main-seeds", nargs="+", type=int, default=[0, 1, 2],
                    help="Seeds of the pre-trained main model to average for "
-                        "the baseline row (default: 0 1 2).")
+                        "the baseline row (default: 0 1 2 → mean±std).")
     args = p.parse_args()
 
     out_dir = Path(args.out_dir)

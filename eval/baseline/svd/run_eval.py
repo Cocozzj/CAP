@@ -53,12 +53,13 @@ def _load_pipeline(svd_ckpt: str, dtype: str = "fp16"):
         torch_dtype=torch_dtype,
         variant="fp16" if dtype == "fp16" else None,
     ).to("cuda")
-    # Memory-efficient attention helps a lot on A100; safe to attempt
-    try:
-        pipe.enable_xformers_memory_efficient_attention()
-    except Exception:
-        pass
-    # CPU-offload would slow us down at scale — keep on GPU
+    # NOTE: we deliberately do NOT call ``enable_xformers_memory_efficient_attention()``
+    # here.  xformers' flash-attn dispatcher hits a CUDA "invalid configuration
+    # argument" error on SVD-XT's temporal-attention shapes (known issue with
+    # certain head_dim / seq_len combos).  Torch 2.5's built-in scaled
+    # dot-product attention is already Flash-Attention-2 under the hood and
+    # delivers similar speed on A100 without the dispatch failure.
+    # CPU-offload would slow us down at scale — keep on GPU.
     return pipe
 
 

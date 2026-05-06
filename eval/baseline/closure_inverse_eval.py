@@ -45,6 +45,46 @@ from .common import TrajMetrics, baseline_output_dir, iter_split_entries
 from .ours.runner import _build_initial_scene, load_model
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Cached random-text sampler for closure pair construction
+# ──────────────────────────────────────────────────────────────────────
+
+_SPLIT_TEXT_CACHE: dict = {}
+
+
+def sample_other_texts(
+    manifest_path: str,
+    data_dir:      str,
+    split:         str,
+    exclude_traj_id: str,
+    n_samples:     int,
+) -> List[str]:
+    """Return ``n_samples`` natural-language task texts from the same
+    split, excluding ``exclude_traj_id``.  Cached per split for speed —
+    the manifest scan is done only on the first call.
+
+    Used to build pseudo 2-macro-step plans for the closure-gap eval:
+    we take this trajectory's 1-step plan + a second 1-step plan from
+    a randomly chosen other text, concatenate, and check whether the
+    composed action token equals the sequential application.
+    """
+    import random
+    key = (manifest_path, data_dir, split)
+    if key not in _SPLIT_TEXT_CACHE:
+        items: List[tuple] = []
+        for tid, _td, ent in iter_split_entries(manifest_path, data_dir, split):
+            if isinstance(ent, dict):
+                items.append((tid, task_to_text(
+                    ent.get("task_name", ""), ent.get("obj_category", ""),
+                )))
+        _SPLIT_TEXT_CACHE[key] = items
+    items = [(tid, txt) for tid, txt in _SPLIT_TEXT_CACHE[key]
+             if tid != exclude_traj_id]
+    if not items:
+        return []
+    return [random.choice(items)[1] for _ in range(n_samples)]
+
+
 def main(argv: List[str] | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--ckpt",     required=True)
@@ -112,26 +152,52 @@ def main(argv: List[str] | None = None) -> int:
                         Path(traj_dir), n_gs_points=10000, c_sh=c_sh,
                         n_slots=n_slots, device=device,
                     )
-                    plan_out = model.plan_from_text(
+                    K = scene.K
+
+                    # Get this traj's plan (1 macro-step typically)
+                    plan_a = model.plan_from_text(
                         texts=[text], sampling_info=None, num_samples=1,
                     )
-                    K = scene.K
-                    plan_tokens = model.unflatten_plan(
-                        plan_out["sequences"], K=K,
-                    )
-                    pp_seq = model.tokens_to_physical_params(plan_tokens)
-                    # tokens_to_physical_params returns per-step tensors of
-                    # shape [B, T, K, ...] (T = plan T_macro).  closure_loss
-                    # requires T ≥ 2; if planner emits a single macro-step,
-                    # we duplicate it (the closure check then degenerates to
-                    # 0 — i.e. a single token trivially commutes with itself).
+                    pt_a = model.unflatten_plan(plan_a["sequences"], K=K)
+                    pp_a = model.tokens_to_physical_params(pt_a)
 
-                    # Average closure / inverse over N samples for stability
+                    # closure_loss needs T ≥ 2.  We sample a *second* token
+                    # by running the planner on a randomly chosen other
+                    # text from the same split, then concatenate it to
+                    # form a 2-macro-step plan.  This tests closure on two
+                    # DIFFERENT atomic tokens — exactly what the algebraic
+                    # property requires (a single token trivially commutes
+                    # with itself, giving 0 — uninformative).
+                    other_texts = sample_other_texts(
+                        args.manifest, args.data_dir, split, traj_id,
+                        n_samples=args.n_samples_per_traj,
+                    )
+
                     cls_vals, inv_vals = [], []
-                    for _ in range(args.n_samples_per_traj):
-                        cls = closure_loss(model.executor, scene, pp_seq,
+                    for other_text in other_texts:
+                        plan_b = model.plan_from_text(
+                            texts=[other_text], sampling_info=None, num_samples=1,
+                        )
+                        pt_b = model.unflatten_plan(plan_b["sequences"], K=K)
+                        pp_b = model.tokens_to_physical_params(pt_b)
+
+                        # Concatenate along T axis: [B, T_a, K, ...] + [B, T_b, K, ...]
+                        # → [B, T_a + T_b, K, ...]
+                        pp_concat = {}
+                        for key in pp_a.keys():
+                            v_a, v_b = pp_a[key], pp_b.get(key)
+                            if v_a is None:
+                                pp_concat[key] = None
+                            elif v_b is None:
+                                pp_concat[key] = v_a
+                            else:
+                                pp_concat[key] = torch.cat([v_a, v_b], dim=1)
+
+                        cls = closure_loss(model.executor, scene, pp_concat,
                                            enable_physics=False)
-                        inv = inverse_loss(model.executor, scene, pp_seq,
+                        # inverse_loss can use the original 1-step plan
+                        # (single-token forward/inverse round trip).
+                        inv = inverse_loss(model.executor, scene, pp_a,
                                            enable_physics=False)
                         cls_vals.append(float(cls.item()))
                         inv_vals.append(float(inv.item()))

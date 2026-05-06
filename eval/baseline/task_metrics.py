@@ -216,30 +216,70 @@ def compute_task_metrics(
     err_kp = np.linalg.norm(pred_kpts - gt_kpts, axis=-1)           # [T_pred, K]
     out["mpjpe"] = float(err_kp.mean())
 
-    # ── Success: did the moving part travel sufficiently in the
-    #            correct direction (revolute) or along the axis
-    #            (prismatic)?  Compare to GT total magnitude. ──
+    # ── Success: tighter criterion that requires BOTH magnitude AND
+    #            DIRECTION alignment between pred and GT centroid motion.
+    #            (The previous version checked only |Δ| magnitude, which
+    #            allowed PhysGaussian's random-direction MPM blob motion to
+    #            pass when its displacement happened to match GT in size.)
+    #
+    # Tightened criteria:
+    #   1. Pred centroid displacement vector must align with GT centroid
+    #      displacement vector (cos similarity ≥ 0.5, i.e., within ~60°).
+    #   2. For revolute: pred *signed* joint angle change must have the
+    #      same sign as GT and reach ≥ ``angle_rad`` magnitude.
+    #   3. For prismatic: pred *signed* displacement along axis must match
+    #      sign of GT change and reach ≥ ``distance_m``.
     th = threshold_for(task_name)
     if th is not None:
+        # Direction agreement on centroid displacement vectors (works for
+        # both revolute and prismatic — the centroid moves either along
+        # an arc or along the axis, both have a clear direction).
+        pred_disp_vec = pred_centroid[-1] - pred_centroid[0]   # [3]
+        gt_disp_vec   = gt_centroid[-1]   - gt_centroid[0]
+        pred_mag = float(np.linalg.norm(pred_disp_vec))
+        gt_mag   = float(np.linalg.norm(gt_disp_vec))
+        if pred_mag > 1e-6 and gt_mag > 1e-6:
+            cos_dir = float(pred_disp_vec @ gt_disp_vec / (pred_mag * gt_mag))
+        else:
+            cos_dir = 0.0
+        ok_direction = (cos_dir >= 0.5)        # within ~60° of GT direction
+
         if is_revolute_task(task_name) and j.type in ("revolute", "continuous"):
             pred_angles = estimate_pred_joint_angle_trajectory(
                 pred_centroid, j.origin_xyz, j.axis,
             )
-            pred_change = abs(float(pred_angles[-1] - pred_angles[0]))
-            gt_change   = abs(float(joint_qpos[-1] - joint_qpos[0]))
-            ok = pred_change >= float(th.angle_rad or 0.0)
-            # Optional: require pred-to-GT alignment within tolerance_frac
-            if gt_change > 1e-3:
-                rel = abs(pred_change - gt_change) / gt_change
-                ok = ok and (rel <= max(th.tolerance_frac, 0.30))
-            out["success"] = float(ok)
+            pred_change_signed = float(pred_angles[-1] - pred_angles[0])
+            gt_change_signed   = float(joint_qpos[-1] - joint_qpos[0])
+            # Sign match (both need to articulate in the SAME direction)
+            ok_sign = (
+                gt_change_signed * pred_change_signed > 0
+                or abs(gt_change_signed) < 0.01      # GT didn't really move → skip
+            )
+            ok_magnitude = abs(pred_change_signed) >= float(th.angle_rad or 0.0)
+            # Tolerance: pred magnitude within 50% of GT magnitude (looser
+            # than direction; we mostly care about getting close to GT goal)
+            if abs(gt_change_signed) > 1e-3:
+                rel = abs(abs(pred_change_signed) - abs(gt_change_signed)) \
+                      / abs(gt_change_signed)
+                ok_magnitude = ok_magnitude and (rel <= 0.50)
+            out["success"] = float(ok_sign and ok_magnitude and ok_direction)
+
         elif j.type == "prismatic":
-            pred_disp = estimate_pred_displacement_trajectory(
+            pred_disp_signed = estimate_pred_displacement_trajectory(
                 pred_centroid, j.axis,
             )
-            pred_change = abs(float(pred_disp[-1] - pred_disp[0]))
-            ok = pred_change >= float(th.distance_m or 0.0)
-            out["success"] = float(ok)
+            pred_change_signed = float(pred_disp_signed[-1] - pred_disp_signed[0])
+            gt_change_signed   = float(joint_qpos[-1] - joint_qpos[0])
+            ok_sign = (
+                gt_change_signed * pred_change_signed > 0
+                or abs(gt_change_signed) < 1e-3
+            )
+            ok_magnitude = abs(pred_change_signed) >= float(th.distance_m or 0.0)
+            if abs(gt_change_signed) > 1e-4:
+                rel = abs(abs(pred_change_signed) - abs(gt_change_signed)) \
+                      / abs(gt_change_signed)
+                ok_magnitude = ok_magnitude and (rel <= 0.50)
+            out["success"] = float(ok_sign and ok_magnitude and ok_direction)
 
     return out
 

@@ -40,7 +40,14 @@ from typing import Dict, List, Optional, Tuple
 # ══════════════════════════════════════════════════════════════════════
 
 _PAPER_NAME = {
-    "tamp_pddl":    "TAMP (PDDLStream)",
+    # PDDLStream + FastDownward couldn't be built on the eval cluster
+    # (CUDA-12 toolchain incompatibility with the old C++ planner).  We
+    # fall back to a simpler symbolic decomposer (read action verb from
+    # meta.json → look up motion primitive → emit [T,7] pose trajectory),
+    # which is fully fair (every baseline sees the same GT meta.json
+    # input) but isn't the full TAMP search loop.  The column header is
+    # renamed to reflect this honestly; a footnote in the paper explains.
+    "tamp_pddl":    "Symbolic + Motion Primitives",
     "physgaussian": "PhysGaussian",
     "physdreamer":  "PhysDreamer",
     "magvit_v2":    "MAGVIT-v2",

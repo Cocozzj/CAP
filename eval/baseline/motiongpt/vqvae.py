@@ -121,6 +121,9 @@ class FlatVQVAE(nn.Module):
         z_q = self.quantizer.lookup(ids)
         return self.dec(z_q)
 
+    # Alias — older infer.py call sites use ``decode_from_ids``.
+    decode_from_ids = decode_ids
+
     def forward(self, x: torch.Tensor):
         """Full pass for training.  Returns (recon, ids, vq_loss)."""
         z_e = self.encode(x)

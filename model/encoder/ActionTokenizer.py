@@ -192,7 +192,16 @@ class VectorQuantizer(nn.Module):
                         rand_idx = torch.randint(
                             0, flat.shape[0], (n_dead,), device=flat.device
                         )
-                        self.codebook.weight.data[dead_mask] = flat[rand_idx].detach()
+                        # Cast to codebook dtype: under AMP, ``flat`` is fp16
+                        # but ``codebook.weight`` is fp32 (trainable params
+                        # are kept in master precision).  Index assignment
+                        # requires matching dtypes, otherwise raises
+                        # "Index put requires the source and destination dtypes match".
+                        # Triggers ~every ``restart_interval`` steps when small K
+                        # produces dead codes (esp. K=64 ablation).
+                        self.codebook.weight.data[dead_mask] = (
+                            flat[rand_idx].detach().to(self.codebook.weight.dtype)
+                        )
                         self.usage_ema[dead_mask] = avg_usage
         
         # ── Losses ──

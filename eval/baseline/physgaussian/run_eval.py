@@ -89,9 +89,9 @@ def _run_physgaussian_one(
 
     cmd = [
         "python", str(physgs_repo / "gs_simulation.py"),
-        "--model_path",  str(model_dir),
-        "--config",      str(cfg_path),
-        "--output_path", str(output_dir),
+        "--model_path",  str(model_dir.resolve()),
+        "--config",      str(cfg_path.resolve()),
+        "--output_path", str(output_dir.resolve()),
         "--output_ply",                              # we need PLYs to parse back
     ]
     env = dict(os.environ)

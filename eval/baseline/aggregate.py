@@ -52,20 +52,32 @@ from .metrics import compute_all_metrics, load_gt_centers
 # Per-trajectory metric computation
 # ══════════════════════════════════════════════════════════════════════
 
-def _load_init_mu(traj_dir: Path) -> Optional[np.ndarray]:
-    """Read init_gs.ply mu only (no need for full SH/cov for geometric metrics).
+def _load_init_mu(traj_dir: Path, n_points: int) -> Optional[np.ndarray]:
+    """Load init_gs.ply mu using the *same* sampling as the runners.
 
-    Falls back to None if plyfile isn't installed.
+    Both ``tamp_pddl/run_tamp.py`` and ``motiongpt/infer.py`` (and our
+    ``ours/runner.py``) call ``load_init_gs_ply(p, n_points=N, seed=0,
+    c_sh=48)`` to subsample a fixed 10000-point cloud from the (possibly
+    50K+) raw PLY.  If we re-sample with different params here, the
+    point indices don't correspond and ADE blows up to ~object-extent
+    even when the prediction is perfectly correct.
+
+    We pass ``n_points=pred.N`` so PhysGaussian (N=50000) and the rest
+    (N=10000) both find a matching init.  Falls back to None if the
+    project's data loader can't be imported.
     """
     try:
-        from plyfile import PlyData
+        from dataload.common import load_init_gs_ply
     except ImportError:
         return None
     p = traj_dir / "init_gs.ply"
     if not p.exists():
         return None
-    v = PlyData.read(str(p))["vertex"].data
-    return np.stack([v["x"], v["y"], v["z"]], axis=-1).astype(np.float32)
+    try:
+        gs = load_init_gs_ply(p, n_points=int(n_points), seed=0, c_sh=48)
+        return gs.mu.numpy().astype(np.float32)
+    except Exception:
+        return None
 
 
 def _evaluate_trajectory(
@@ -93,7 +105,11 @@ def _evaluate_trajectory(
         return None
 
     seq = GS4DSequence.load(pred_npz_path)
-    init_mu = _load_init_mu(traj_dir)
+    # Use the prediction's own N to match the runner's n_points sampling.
+    # Falls back to pred frame-0 if loading from PLY fails.
+    init_mu = _load_init_mu(traj_dir, n_points=int(seq.mu.shape[1]))
+    if init_mu is None:
+        init_mu = np.asarray(seq.mu[0], dtype=np.float32)
 
     gt_centers: Optional[np.ndarray] = None
     if init_mu is not None:

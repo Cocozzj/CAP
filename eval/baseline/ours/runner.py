@@ -263,6 +263,10 @@ def main(argv: List[str] | None = None) -> int:
                             "test_ood_unseen_object", "test_compositional_long"])
     p.add_argument("--output-root",  default="runs/baselines")
     p.add_argument("--dataset-name", default="dataset_a")
+    p.add_argument("--baseline-name", default="ours",
+                   help="output bucket name; useful for multi-seed runs "
+                        "(e.g. ours_s0, ours_s1, ours_s2 → aggregated to "
+                        "ours mean ± std at format_latex time)")
     p.add_argument("--no-physics", action="store_true",
                    help="disable physics module during inference (debug)")
     p.add_argument("--limit", type=int, default=None,
@@ -294,7 +298,7 @@ def main(argv: List[str] | None = None) -> int:
             n_total += 1
 
             out_dir = baseline_output_dir(
-                args.output_root, "ours",
+                args.output_root, args.baseline_name,
                 args.dataset_name, split, traj_id,
             )
             pred_path = out_dir / "pred_4dgs.npz"

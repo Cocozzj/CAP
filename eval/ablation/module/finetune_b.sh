@@ -23,8 +23,8 @@ MASTER_PORT="${MASTER_PORT:-29502}"        # different port from train_a.sh
 MANIFEST="${MANIFEST:-dataset/dataset_b/manifest.json}"
 DATA_DIR="${DATA_DIR:-dataset/dataset_b/data}"
 
-CFG_ROOT="${CFG_ROOT:-configs/_ablation}"
-RUN_ROOT="${RUN_ROOT:-runs/ablation/module}"
+CFG_ROOT="${CFG_ROOT:-configs/_ablation_module}"
+RUN_ROOT="${RUN_ROOT:-runs/module}"
 
 if [[ ! -d configs ]] || [[ ! -d train ]] || [[ ! -d eval ]]; then
     echo "ERROR: run from CAP root. cwd=$(pwd)"

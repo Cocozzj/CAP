@@ -3,13 +3,13 @@
 #
 # Mirror of module/eval_all.sh but skips the B half (Tier 2 doesn't
 # fine-tune on B).  Each variant's eval lands in
-# runs/ablation/loss/<variant>/seed_<S>/eval_a/<eval>/.
+# runs/loss/<variant>/seed_<S>/eval_a/<eval>/.
 
 set -euo pipefail
 
 VARIANTS="${VARIANTS:-no_L_clos no_L_inv no_L_comm no_L_hier no_L_nce no_kl_anneal}"
 SEED="${SEED:-0}"
-RUN_ROOT="${RUN_ROOT:-runs/ablation/loss}"
+RUN_ROOT="${RUN_ROOT:-runs/loss}"
 
 A_MANIFEST="${A_MANIFEST:-dataset/dataset_a/manifest.json}"
 A_DATA="${A_DATA:-dataset/dataset_a/data}"
@@ -63,9 +63,9 @@ done
 
 # Main reference — A on all 3 seeds for mean±std baseline.
 MAIN_SEEDS="${MAIN_SEEDS:-0 1 2}"
-MAIN_OUT="${MAIN_OUT:-runs/ablation/loss/_main}"
+MAIN_OUT="${MAIN_OUT:-runs/loss/_main}"
 for MS in $MAIN_SEEDS; do
-    A_CK="runs/main_exp/seed_${MS}/ckpt/main_exp_final.pt"
+    A_CK="runs/main_a/seed_${MS}/ckpt/main_exp_final.pt"
     if [[ ! -f "$A_CK" ]]; then
         echo "  main seed=${MS} A ckpt not found, skipping"
         continue

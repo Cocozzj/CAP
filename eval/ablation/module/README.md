@@ -21,7 +21,7 @@
 | 文件 | 作用 |
 |---|---|
 | `variants.py` | 6 个变体的 single source of truth（重要！加新变体只改这一个文件）|
-| `make_config.py` | 把 base config + loss + loss_b 按变体 patch，存到 `configs/_ablation/<variant>/` |
+| `make_config.py` | 把 base config + loss + loss_b 按变体 patch，存到 `configs/_ablation_module/<variant>/` |
 | `train_a.sh` | A 训练循环 |
 | `finetune_b.sh` | B 微调循环（依赖 train_a.sh 的 ckpt）|
 | `eval_all.sh` | 跑 algebraic_gaps / trajectory / success / diversity 全套 |
@@ -55,7 +55,7 @@ bash eval/ablation/module/eval_all.sh
 
 # 4) 聚合成 Tab 6
 python eval/ablation/module/aggregate.py
-#   → runs/ablation/module/_aggregate/table6.{csv,md}
+#   → runs/module/_aggregate/table6.{csv,md}
 ```
 
 ## 单变体测试
@@ -94,7 +94,7 @@ VARIANTS="no_lipschitz" MAX_EPOCHS=2 \
 | `make_config.py: KeyError on dotpath` | yaml schema 改了；更新 variants.py 里的键路径 |
 | trainer 启动报 `unrecognized arguments: --no-physics` | trainer.py 没 sync；server 上还是老版本 |
 | L_Lip 在 no_lipschitz 上仍非零 | 看 TB；记得 `lambda_lip=0` 只去掉 loss 项，spectral_norm wrap 仍在 vfield 里 |
-| eval 全 `-`（aggregate 表里）| 看 `runs/ablation/module/<v>/seed_0/eval_a/<eval>/` 目录是否存在；可能 eval 脚本崩了 |
+| eval 全 `-`（aggregate 表里）| 看 `runs/module/<v>/seed_0/eval_a/<eval>/` 目录是否存在；可能 eval 脚本崩了 |
 
 ## 论文里的位置
 

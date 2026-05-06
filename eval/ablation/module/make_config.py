@@ -13,7 +13,7 @@ Usage::
     python eval/ablation/module/make_config.py --variant no_algebraic \\
         --base-config configs/config.yaml \\
         --base-loss-a configs/loss.yaml   --base-loss-b configs/loss_b.yaml \\
-        --out-dir configs/_ablation/no_algebraic
+        --out-dir configs/_ablation_module/no_algebraic
 
 Path overrides use dot-notation in variants.py:
   ``"loss.lambda_clos": 0.0``   →   cfg["loss"]["lambda_clos"] = 0.0

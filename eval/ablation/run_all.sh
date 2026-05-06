@@ -45,8 +45,8 @@ bash eval/ablation/ksweep/train_sweep.sh
 section "Phase 1: K-sweep eval + plot"
 bash eval/ablation/ksweep/eval_sweep.sh
 python eval/ablation/ksweep/plot_theorem1.py \
-    --summary runs/ablation/ksweep/_eval/summary.json \
-    --output  runs/ablation/ksweep/_eval/theorem1.pdf || echo "(plot failed, see eval output)"
+    --summary runs/ksweep/_eval/summary.json \
+    --output  runs/ksweep/_eval/theorem1.pdf || echo "(plot failed, see eval output)"
 
 # ──────────────────────────────────────────────────────────────────────
 # Phase 2: Module-level (Tier 1) — A then B then eval
@@ -89,8 +89,8 @@ python eval/ablation/loss/aggregate.py
 section "ALL ABLATIONS COMPLETE"
 echo ""
 echo "  Outputs:"
-echo "    K-sweep        : runs/ablation/ksweep/_eval/{summary.json, theorem1.pdf}"
-echo "    Module (Tab 6) : runs/ablation/module/_aggregate/table6.{csv,md}"
-echo "    Loss   (Tab S1): runs/ablation/loss/_aggregate/table_loss.{csv,md}"
+echo "    K-sweep        : runs/ksweep/_eval/{summary.json, theorem1.pdf}"
+echo "    Module (Tab 6) : runs/module/_aggregate/table6.{csv,md}"
+echo "    Loss   (Tab S1): runs/loss/_aggregate/table_loss.{csv,md}"
 echo ""
 echo "  $(ts)  done."

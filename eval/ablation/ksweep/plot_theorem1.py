@@ -11,8 +11,8 @@ Read the summary.json produced by ``eval_sweep.sh`` (which calls
 Usage::
 
     python eval/ablation/ksweep/plot_theorem1.py \\
-        --summary runs/ablation/ksweep/_eval/summary.json \\
-        --output  runs/ablation/ksweep/_eval/theorem1_plot.pdf
+        --summary runs/ksweep/_eval/summary.json \\
+        --output  runs/ksweep/_eval/theorem1.pdf
 
 Optional: ``--metrics closure inverse`` to only plot a subset.
 """

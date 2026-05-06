@@ -1,7 +1,7 @@
 """aggregate.py — pull eval JSONs across ablation variants → Tab 6 table.
 
-Reads ``runs/ablation/module/<variant>/seed_<S>/eval_{a,b}/<eval>/results.json``
-plus the corresponding ``runs/ablation/module/_main/seed_<S>/...`` for the
+Reads ``runs/module/<variant>/seed_<S>/eval_{a,b}/<eval>/results.json``
+plus the corresponding ``runs/module/_main/seed_<S>/...`` for the
 unablated baseline, and produces:
 
   - <out_dir>/table6.csv         — wide-format CSV
@@ -9,8 +9,8 @@ unablated baseline, and produces:
   - <out_dir>/raw.json           — flat dump of every (variant, dataset, metric) tuple
 
 Conventions:
-  - The "main" row uses runs/ablation/module/_main/... (auto-populated by
-    eval_all.sh) — this is the SAME ckpt as runs/main_exp/seed_S, just
+  - The "main" row uses runs/module/_main/... (auto-populated by
+    eval_all.sh) — this is the SAME ckpt as runs/main_a/seed_S, just
     re-evaluated under identical eval args.
   - Missing JSONs render as ``-`` (eval likely failed).  See the per-variant
     train logs for diagnostics.
@@ -199,11 +199,11 @@ def write_raw(rows: List[Dict[str, Any]], out: Path) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--run-root",  type=str, default="runs/ablation/module")
-    p.add_argument("--main-root", type=str, default="runs/ablation/module/_main")
+    p.add_argument("--run-root",  type=str, default="runs/module")
+    p.add_argument("--main-root", type=str, default="runs/module/_main")
     p.add_argument("--seed",      type=int, default=0)
     p.add_argument("--variants",  nargs="+", default=variants_mod.list_variants())
-    p.add_argument("--out-dir",   type=str, default="runs/ablation/module/_aggregate")
+    p.add_argument("--out-dir",   type=str, default="runs/module/_aggregate")
     p.add_argument("--datasets",  nargs="+", default=["a", "b"], choices=["a", "b"],
                    help="Which dataset halves to include (default: both). "
                         "For A-only ablation pass --datasets a")

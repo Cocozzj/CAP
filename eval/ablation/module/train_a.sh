@@ -2,7 +2,7 @@
 # train_a.sh — Train all module-ablation variants on Dataset-A.
 #
 # For each variant in variants.py: patch configs, run trainer.
-# Output goes to runs/ablation/module/<variant>/seed_<S>/.
+# Output goes to runs/module/<variant>/seed_<S>/.
 #
 # Run from /workspace/CAP/:
 #     bash eval/ablation/module/train_a.sh
@@ -25,8 +25,8 @@ MASTER_PORT="${MASTER_PORT:-29501}"
 MANIFEST="${MANIFEST:-dataset/dataset_a/manifest.json}"
 DATA_DIR="${DATA_DIR:-dataset/dataset_a/data}"
 
-CFG_ROOT="${CFG_ROOT:-configs/_ablation}"
-RUN_ROOT="${RUN_ROOT:-runs/ablation/module}"
+CFG_ROOT="${CFG_ROOT:-configs/_ablation_module}"
+RUN_ROOT="${RUN_ROOT:-runs/module}"
 
 # ─── Sanity ─────────────────────────────────────────────────────────────
 if [[ ! -d configs ]] || [[ ! -d train ]] || [[ ! -d eval ]]; then

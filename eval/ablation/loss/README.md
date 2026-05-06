@@ -23,7 +23,7 @@
 | `make_config.py`  | base config 按变体 patch 到 `configs/_ablation_loss/<variant>/` |
 | `train_a.sh`      | 仅 A 训练循环（不做 B fine-tune）|
 | `eval_all.sh`     | A test 上跑 4 项 eval |
-| `aggregate.py`    | 输出 `runs/ablation/loss/_aggregate/table_loss.{csv,md}` |
+| `aggregate.py`    | 输出 `runs/loss/_aggregate/table_loss.{csv,md}` |
 
 ## 在 8×H100 上的执行流程
 

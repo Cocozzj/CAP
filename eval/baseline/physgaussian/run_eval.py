@@ -411,7 +411,18 @@ def main(argv: List[str] | None = None) -> int:
     p.add_argument("--timeout", type=int, default=600,
                    help="per-trajectory timeout (PhysGaussian sims can hang on degenerate input)")
     p.add_argument("--limit", type=int, default=None)
+    # Sharded execution: split trajectories deterministically across N
+    # workers so several can run in parallel on different GPUs.  Worker i
+    # processes traj at index j whenever (j % num_shards) == shard_index.
+    # Pin GPU per worker via CUDA_VISIBLE_DEVICES from the launching shell.
+    p.add_argument("--shard-index", type=int, default=0,
+                   help="this worker's shard id (0-based)")
+    p.add_argument("--num-shards", type=int, default=1,
+                   help="total number of parallel workers; combine with "
+                        "CUDA_VISIBLE_DEVICES to pin each worker to one GPU")
     args = p.parse_args(argv)
+    assert 0 <= args.shard_index < args.num_shards, \
+        f"shard-index {args.shard_index} out of range for num-shards {args.num_shards}"
 
     physgs_repo = Path(args.physgs_repo).expanduser().resolve()
     if not (physgs_repo / "gs_simulation.py").exists():
@@ -430,7 +441,15 @@ def main(argv: List[str] | None = None) -> int:
     t0 = time.time()
     for split in splits:
         split_dir = base / split
-        traj_dirs = [d for d in sorted(split_dir.iterdir()) if d.is_dir()]
+        all_traj_dirs = [d for d in sorted(split_dir.iterdir()) if d.is_dir()]
+        # Deterministic round-robin sharding so the work is balanced even
+        # if some shards finish their slot faster than others (e.g. GPU
+        # 0 happens to draw all the easy box trajs).
+        traj_dirs = [d for j, d in enumerate(all_traj_dirs)
+                     if (j % args.num_shards) == args.shard_index]
+        if args.num_shards > 1:
+            print(f"[shard {args.shard_index}/{args.num_shards}] "
+                  f"split={split}: {len(traj_dirs)}/{len(all_traj_dirs)} trajs")
         for i, traj_dir in enumerate(traj_dirs):
             if args.limit is not None and total >= args.limit:
                 break

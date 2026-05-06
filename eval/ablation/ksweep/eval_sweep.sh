@@ -2,8 +2,8 @@
 # eval_sweep.sh — Run eval.k_scaling_sweep over all K-variant ckpts.
 #
 # Picks up:
-#   - K ∈ {64, 128, 256, 1024, 2048} from runs/ablation/ksweep/K{K}/seed_{S}/...
-#   - K=512 from the original main run runs/main_exp/seed_{S}/...
+#   - K ∈ {64, 128, 256, 1024, 2048} from runs/ksweep/K{K}/seed_{S}/...
+#   - K=512 from the original main run runs/main_a/seed_{S}/...
 #
 # Run from /workspace/CAP/:
 #     bash eval/ablation/ksweep/eval_sweep.sh
@@ -20,8 +20,8 @@ BATCH_SIZE="${BATCH_SIZE:-4}"
 SPLIT="${SPLIT:-test_iid}"
 
 # Where main K=512 model lives, vs ablation K-variants.
-MAIN_DIR="${MAIN_DIR:-runs/main_exp}"
-SWEEP_DIR="${SWEEP_DIR:-runs/ablation/ksweep}"
+MAIN_DIR="${MAIN_DIR:-runs/main_a}"
+SWEEP_DIR="${SWEEP_DIR:-runs/ksweep}"
 
 # Dataset paths (must point to A — closure / inverse / commutator are
 # defined w.r.t. A's algebraic structure).

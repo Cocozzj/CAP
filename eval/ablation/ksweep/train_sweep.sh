@@ -2,7 +2,7 @@
 # train_sweep.sh — Train K-sweep variants on Dataset-A for Theorem 1 verification.
 #
 # Sweep K ∈ {64, 128, 256, 1024, 2048} sequentially.  K=512 is the existing
-# main model (`runs/main_exp/seed_0/`) — *not* re-trained here.
+# main model (`runs/main_a/seed_0/`) — *not* re-trained here.
 #
 # Run from /workspace/CAP/ (or wherever CAP is checked out):
 #     bash eval/ablation/ksweep/train_sweep.sh
@@ -26,8 +26,9 @@ MASTER_PORT="${MASTER_PORT:-29501}"
 MANIFEST="${MANIFEST:-dataset/dataset_a/manifest.json}"
 DATA_DIR="${DATA_DIR:-dataset/dataset_a/data}"
 
-# Where ksweep outputs go.
-ROOT_OUT="${ROOT_OUT:-runs/ablation/ksweep}"
+# Where ksweep outputs go.  Flat under runs/ to match main_a / finetune_b
+# siblings (instead of nested under runs/ablation/).
+ROOT_OUT="${ROOT_OUT:-runs/ksweep}"
 CFG_DIR="${CFG_DIR:-configs/_ksweep}"
 
 # ─── Sanity: must run from CAP root (where configs/ and train/ live) ──

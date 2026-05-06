@@ -109,11 +109,11 @@ def build_rows(run_root: Path, main_root: Path, seed: int,
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--run-root",  type=str, default="runs/ablation/loss")
-    p.add_argument("--main-root", type=str, default="runs/ablation/loss/_main")
+    p.add_argument("--run-root",  type=str, default="runs/loss")
+    p.add_argument("--main-root", type=str, default="runs/loss/_main")
     p.add_argument("--seed",      type=int, default=0)
     p.add_argument("--variants",  nargs="+", default=variants_mod.list_variants())
-    p.add_argument("--out-dir",   type=str, default="runs/ablation/loss/_aggregate")
+    p.add_argument("--out-dir",   type=str, default="runs/loss/_aggregate")
     p.add_argument("--main-seeds", nargs="+", type=int, default=[0, 1, 2])
     args = p.parse_args()
 

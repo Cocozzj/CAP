@@ -20,9 +20,10 @@
 /workspace/CAP/
 ├── configs/                        # 已有
 ├── eval/                           # 已有 (k_scaling_sweep.py 等)
-├── eval/ablation/ksweep/           # ← 新增（本目录）
-├── runs/main_exp/seed_0/...        # 已有 K=512 main 模型
-└── runs/ablation/ksweep/K{N}/      # ← sweep 输出会到这
+├── eval/ablation/ksweep/           # ← 本目录
+├── runs/main_a/seed_0/...          # 已有 K=512 main 模型（3 seeds）
+├── runs/finetune_b/seed_0/...      # 已有 B fine-tune
+└── runs/ksweep/K{N}/               # ← sweep 输出（与 main_a 同级）
 ```
 
 ## 使用流程
@@ -30,7 +31,7 @@
 ```bash
 cd /workspace/CAP
 
-# 1) Train 4 个 K-variants（K=512 已有 main 模型，跳过）
+# 1) Train 4 个 K-variants（K=512 复用 main_a/seed_0）
 bash eval/ablation/ksweep/train_sweep.sh
 
 # 2) 跑 eval，聚合 gaps
@@ -38,8 +39,8 @@ bash eval/ablation/ksweep/eval_sweep.sh
 
 # 3) 出图
 python eval/ablation/ksweep/plot_theorem1.py \
-    --summary runs/ablation/ksweep/_eval/summary.json \
-    --output  runs/ablation/ksweep/_eval/theorem1_plot.pdf
+    --summary runs/ksweep/_eval/summary.json \
+    --output  runs/ksweep/_eval/theorem1.pdf
 ```
 
 ## 配置选择
@@ -51,10 +52,10 @@ python eval/ablation/ksweep/plot_theorem1.py \
 
 ## 期望输出（论文素材）
 
-- `runs/ablation/ksweep/_eval/summary.json` — per-K 的 closure / inverse / commutator gap
-- `runs/ablation/ksweep/_eval/points.csv` — 表格用
-- `runs/ablation/ksweep/_eval/theorem1_plot.pdf` — Fig. 3 候选图（log-log，K^(-1/d) 理论线叠加）
-- `runs/ablation/ksweep/_eval/fit.json` — 拟合的 (A, d, R²)
+- `runs/ksweep/_eval/summary.json` — per-K 的 closure / inverse / commutator gap
+- `runs/ksweep/_eval/points.csv` — 表格用
+- `runs/ksweep/_eval/theorem1.pdf` — Fig. 3 候选图（log-log，K^(-1/d) 理论线叠加）
+- `runs/ksweep/_eval/fit.json` — 拟合的 (A, d, R²)
 
 ## 论文映射
 

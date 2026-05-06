@@ -12,7 +12,7 @@ Conventions:
     walks the dict on dump to produce the patched yaml.
   - These ablations are applied during BOTH the A train and the B fine-tune,
     so a single override propagates correctly across the full A→B pipeline.
-  - The "main" model (no ablation) is the existing ``runs/main_exp/seed_X/``
+  - The "main" model (no ablation) is the existing ``runs/main_a/seed_X/``
     — no entry here.
 
 PDF mapping:  §5.2 实验五 / 消融实验

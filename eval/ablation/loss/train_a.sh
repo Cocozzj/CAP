@@ -4,7 +4,7 @@
 # Run from /workspace/CAP/:
 #     bash eval/ablation/loss/train_a.sh
 #
-# Output: runs/ablation/loss/<variant>/seed_<S>/
+# Output: runs/loss/<variant>/seed_<S>/
 # Configs: configs/_ablation_loss/<variant>/
 
 set -euo pipefail
@@ -21,7 +21,7 @@ MANIFEST="${MANIFEST:-dataset/dataset_a/manifest.json}"
 DATA_DIR="${DATA_DIR:-dataset/dataset_a/data}"
 
 CFG_ROOT="${CFG_ROOT:-configs/_ablation_loss}"
-RUN_ROOT="${RUN_ROOT:-runs/ablation/loss}"
+RUN_ROOT="${RUN_ROOT:-runs/loss}"
 
 if [[ ! -d configs ]] || [[ ! -d train ]] || [[ ! -d eval ]]; then
     echo "ERROR: run from CAP root.  cwd=$(pwd)"; exit 1

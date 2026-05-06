@@ -7,7 +7,7 @@
 #   - success_rate       (--zero-shot, on held-out split)
 #   - diversity          (Levenshtein + codebook usage)
 #
-# Output: runs/ablation/module/<variant>/seed_<S>/{eval_a,eval_b}/<eval>/results.json
+# Output: runs/module/<variant>/seed_<S>/{eval_a,eval_b}/<eval>/results.json
 # These get aggregated by aggregate.py into Tab 6.
 #
 # Run from /workspace/CAP/:
@@ -17,7 +17,7 @@ set -euo pipefail
 
 VARIANTS="${VARIANTS:-no_hier no_algebraic no_cvae no_physics no_equivariance no_lipschitz}"
 SEED="${SEED:-0}"
-RUN_ROOT="${RUN_ROOT:-runs/ablation/module}"
+RUN_ROOT="${RUN_ROOT:-runs/module}"
 
 # Eval data — A test set + B test set.
 A_MANIFEST="${A_MANIFEST:-dataset/dataset_a/manifest.json}"
@@ -101,13 +101,13 @@ done
 # ─── Run main model on ALL 3 seeds for mean±std baseline ──────────────
 # Ablations use 1 seed per the standard protocol (Act4D MD: "主表 3 seeds，
 # 其他 1 seed").  The main row in Tab 6 should be averaged over the 3
-# pre-trained main_exp seeds (already present at runs/main_exp/seed_{0,1,2}/
-# and runs/finetune_b/seed_{0,1,2}/).
+# pre-trained main seeds at runs/main_a/seed_{0,1,2}/ and
+# runs/finetune_b/seed_{0,1,2}/.
 MAIN_SEEDS="${MAIN_SEEDS:-0 1 2}"
-MAIN_OUT="${MAIN_OUT:-runs/ablation/module/_main}"
+MAIN_OUT="${MAIN_OUT:-runs/module/_main}"
 
 for MS in $MAIN_SEEDS; do
-    A_CK="runs/main_exp/seed_${MS}/ckpt/main_exp_final.pt"
+    A_CK="runs/main_a/seed_${MS}/ckpt/main_exp_final.pt"
     B_CK="runs/finetune_b/seed_${MS}/ckpt/main_exp_final.pt"
     if [[ ! -f "$A_CK" ]]; then
         echo "  main seed=${MS} A ckpt not found ($A_CK), skipping"

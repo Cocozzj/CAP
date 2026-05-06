@@ -31,8 +31,8 @@ nohup bash eval/ablation/run_all.sh > ablation_master.log 2>&1 &
 bash eval/ablation/ksweep/train_sweep.sh && \
 bash eval/ablation/ksweep/eval_sweep.sh && \
 python eval/ablation/ksweep/plot_theorem1.py \
-    --summary runs/ablation/ksweep/_eval/summary.json \
-    --output  runs/ablation/ksweep/_eval/theorem1.pdf
+    --summary runs/ksweep/_eval/summary.json \
+    --output  runs/ksweep/_eval/theorem1.pdf
 
 # Phase 2: Module（Tab 6 主消融）
 bash eval/ablation/module/train_a.sh
@@ -72,7 +72,7 @@ python eval/ablation/loss/aggregate.py
 
 如果想强制重跑某个 variant：
 ```bash
-rm -rf runs/ablation/module/no_lipschitz/seed_0/ckpt/
+rm -rf runs/module/no_lipschitz/seed_0/ckpt/
 VARIANTS=no_lipschitz bash eval/ablation/module/train_a.sh
 ```
 

@@ -34,19 +34,36 @@ from ..common import GS4DSequence, TrajMetrics
 # PLY adapter:  our (sh_degree=0)  →  PhysGaussian's expected (sh_degree=3)
 # ════════════════════════════════════════════════════════════════════════
 
-def _write_sh3_padded_ply(src: Path, dst: Path) -> None:
-    """Read ``src`` (a 3DGS PLY at any SH degree) and write ``dst`` with
-    exactly 45 zero-padded ``f_rest_*`` columns so 3DGS's strict
-    ``load_ply`` (with ``max_sh_degree=3``) accepts it.
+def _transform_and_pad_ply(
+    src: Path,
+    dst: Path,
+    target_extent: float = 0.4,
+    target_center: tuple[float, float, float] = (1.0, 1.0, 0.8),
+) -> dict:
+    """Read ``src`` (a sh_degree=0 3DGS PLY in arbitrary coords) and write
+    ``dst`` (sh_degree=3, properties matching PhysGaussian's strict loader,
+    AND geometry rigidly mapped into PhysGaussian's MPM grid space).
 
-    Required output columns (in this order, per gaussian_model.py):
+    Why both transforms in one pass?
+    --------------------------------
+    PhysGaussian's MPM grid is implicitly [0, 2]³ with the object expected
+    near (1, 1, 1) (see ficus / wolf / tear_bread example configs).  Our
+    PartNet-derived PLYs live in roughly [-0.7, 0.6]³ (centered ≈ origin).
+    Without the transform, particles immediately escape the grid and the
+    Warp MPM kernel hits CUDA_ERROR_ILLEGAL_ADDRESS.
+
+    Required output columns (in this order, per ``gaussian_model.py``):
         x, y, z, nx, ny, nz,
-        f_dc_0, f_dc_1, f_dc_2,
-        f_rest_0 ... f_rest_44,
+        f_dc_0..2,
+        f_rest_0..44,
         opacity,
-        scale_0, scale_1, scale_2,
-        rot_0, rot_1, rot_2, rot_3
+        scale_0..2,
+        rot_0..3
     Total = 3 + 3 + 3 + 45 + 1 + 3 + 4 = 62 properties.
+
+    Returns a dict ``{src_center, src_extent, scale, target_center,
+    target_extent}`` so the caller can patch the config (viewpoint center,
+    boundary conditions) consistently with the new geometry.
     """
     from plyfile import PlyData, PlyElement
 
@@ -60,21 +77,34 @@ def _write_sh3_padded_ply(src: Path, dst: Path) -> None:
         except (KeyError, ValueError):
             return np.full(n_pts, default, dtype=np.float32)
 
-    # Build full property dict
+    xyz = np.stack([col("x"), col("y"), col("z")], axis=1)
+    src_min = xyz.min(axis=0)
+    src_max = xyz.max(axis=0)
+    src_center = (src_min + src_max) / 2.0
+    src_extent = float((src_max - src_min).max())
+    scale = float(target_extent / max(src_extent, 1e-6))
+
+    target_center_np = np.asarray(target_center, dtype=np.float32)
+    new_xyz = (xyz - src_center) * scale + target_center_np
+    # Gaussian scale is stored as log(σ) in 3DGS PLYs — uniform spatial
+    # scaling adds log(scale) to each scale_* channel.
+    log_scale_factor = float(np.log(scale))
+
     cols = {
-        "x":  col("x"),  "y":  col("y"),  "z":  col("z"),
-        "nx": col("nx"), "ny": col("ny"), "nz": col("nz"),
+        "x":  new_xyz[:, 0], "y":  new_xyz[:, 1], "z":  new_xyz[:, 2],
+        "nx": col("nx"),     "ny": col("ny"),     "nz": col("nz"),
         "f_dc_0": col("f_dc_0"),
         "f_dc_1": col("f_dc_1"),
         "f_dc_2": col("f_dc_2"),
     }
-    # Pad / copy 45 f_rest_*
     for i in range(45):
         cols[f"f_rest_{i}"] = col(f"f_rest_{i}", default=0.0)
     cols["opacity"] = col("opacity")
-    cols["scale_0"] = col("scale_0"); cols["scale_1"] = col("scale_1"); cols["scale_2"] = col("scale_2")
-    cols["rot_0"]   = col("rot_0");   cols["rot_1"]   = col("rot_1")
-    cols["rot_2"]   = col("rot_2");   cols["rot_3"]   = col("rot_3")
+    cols["scale_0"] = col("scale_0") + log_scale_factor
+    cols["scale_1"] = col("scale_1") + log_scale_factor
+    cols["scale_2"] = col("scale_2") + log_scale_factor
+    cols["rot_0"]   = col("rot_0", default=1.0)        # quaternion w default 1
+    cols["rot_1"]   = col("rot_1"); cols["rot_2"] = col("rot_2"); cols["rot_3"] = col("rot_3")
 
     dtype = [(k, "f4") for k in cols.keys()]
     arr = np.empty(n_pts, dtype=dtype)
@@ -83,6 +113,55 @@ def _write_sh3_padded_ply(src: Path, dst: Path) -> None:
 
     el = PlyElement.describe(arr, "vertex")
     PlyData([el], text=False).write(str(dst))
+
+    return {
+        "src_center":    src_center.tolist(),
+        "src_extent":    src_extent,
+        "scale":         scale,
+        "target_center": list(target_center),
+        "target_extent": target_extent,
+    }
+
+
+def _patch_physgs_config(orig_path: Path, dst_path: Path, xform: dict) -> None:
+    """Load convert_data's config and add the bits PhysGaussian needs to
+    actually run: a confining ``bounding_box`` BC, a sticky ground plane
+    just below the (transformed) object, and ``mpm_space_viewpoint_center``
+    aligned with where we placed the object.
+
+    Also strips fields convert_data added for our own bookkeeping
+    (model_path / traj_id / dataset / split) so PhysGaussian doesn't choke
+    on unknown keys.
+    """
+    cfg = json.loads(orig_path.read_text())
+
+    target_center = xform["target_center"]
+    target_extent = xform["target_extent"]
+    # Floor sits 0.05 units below the object's lowest point — keeps the
+    # MPM solver from instantly clamping particles into the ground plane.
+    floor_z = max(target_center[2] - target_extent / 2.0 - 0.05, 0.05)
+
+    cfg["mpm_space_viewpoint_center"] = list(target_center)
+
+    cfg["boundary_conditions"] = [
+        {"type": "bounding_box"},        # confine particles to MPM grid
+        {                                # ground plane
+            "type":       "surface_collider",
+            "point":      [target_center[0], target_center[1], floor_z],
+            "normal":     [0.0, 0.0, 1.0],
+            "surface":    "sticky",
+            "friction":   0.5,
+            "start_time": 0,
+            "end_time":   1000.0,
+        },
+    ]
+
+    # Strip our bookkeeping fields — PhysGaussian's decode_param.py may
+    # not tolerate extras depending on the version.
+    for k in ("model_path", "traj_id", "dataset", "split"):
+        cfg.pop(k, None)
+
+    dst_path.write_text(json.dumps(cfg, indent=2))
 
 
 def _run_physgaussian_one(
@@ -141,21 +220,29 @@ def _run_physgaussian_one(
     if target_ply.exists() or target_ply.is_symlink():
         target_ply.unlink()
 
-    # PhysGaussian's load_checkpoint() hard-codes sh_degree=3, which makes
-    # 3DGS's load_ply() assert exactly 45 ``f_rest_*`` properties (= 3 ·
-    # (3+1)² − 3).  Our PLYs are sh_degree=0 (only DC), so we materialise a
-    # padded copy with 45 zero-filled f_rest columns instead of a symlink.
+    # 1. Transform PLY into PhysGaussian's MPM grid space ([0,2]³ around
+    #    ~ (1,1,1)) and pad SH up to degree 3.  ``load_checkpoint()`` hard-
+    #    codes sh_degree=3 → 3DGS's load_ply asserts 45 ``f_rest_*`` props.
     try:
-        _write_sh3_padded_ply(init_ply, target_ply)
+        xform = _transform_and_pad_ply(init_ply, target_ply)
     except Exception as e:
-        return False, f"failed to pad PLY to sh_degree=3: {e}"
+        return False, f"failed to transform/pad PLY: {e}"
 
-    # gs_simulation.py's get_camera_view() unconditionally opens
-    # ``model_path/cameras.json`` even when --render_img is off (the
-    # rasterizer is built every frame inside the main loop).  With
-    # default_camera_index=-1 (our config), only width/height/fx/fy
-    # come from this file — position/rotation are overridden from
-    # init_azimuthm/elevation/radius.  Write a minimal one-camera entry.
+    # 2. Patch the JSON config: add a bounding_box + ground-plane BC and
+    #    align mpm_space_viewpoint_center with where we placed the object.
+    #    Without these, the MPM solver immediately diverges (particles
+    #    escape the grid → CUDA_ERROR_ILLEGAL_ADDRESS in Warp).
+    patched_cfg_path = model_dir / "physgs_config_patched.json"
+    try:
+        _patch_physgs_config(cfg_path, patched_cfg_path, xform)
+    except Exception as e:
+        return False, f"failed to patch config: {e}"
+
+    # 3. gs_simulation.py's get_camera_view() opens ``model_path/cameras.json``
+    #    every frame even when --render_img is off (rasterizer is built
+    #    inside the simulation loop).  With default_camera_index=-1 only
+    #    width/height/fx/fy come from this file — position/rotation get
+    #    overridden from init_azimuthm/elevation/radius.
     cameras_json = model_dir / "cameras.json"
     cameras_json.write_text(json.dumps([{
         "id":       0,
@@ -173,7 +260,7 @@ def _run_physgaussian_one(
     cmd = [
         "python", str(physgs_repo / "gs_simulation.py"),
         "--model_path",  str(model_dir.resolve()),
-        "--config",      str(cfg_path.resolve()),
+        "--config",      str(patched_cfg_path.resolve()),
         "--output_path", str(output_dir.resolve()),
         "--output_ply",                              # we need PLYs to parse back
     ]

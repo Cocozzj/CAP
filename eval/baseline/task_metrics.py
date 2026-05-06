@@ -45,6 +45,7 @@ from .keypoint_extractor import (
     estimate_pred_joint_angle_trajectory,
     part_centroid_trajectory,
     part_keypoints,
+    part_keypoints_indices,
 )
 from .success_thresholds import (
     is_revolute_task,
@@ -180,6 +181,23 @@ def compute_task_metrics(
     mask = estimate_moving_mask(pred_mu, top_frac=top_frac)
     pred_centroid = part_centroid_trajectory(pred_mu, mask)         # [T_pred, 3]
     pred_kpts     = part_keypoints(pred_mu, mask, n_kpts=n_kpts)    # [T_pred, K, 3]
+
+    # Ours' planner emits a single macro-step → pred_mu has T=1.  In that
+    # case, pred[0] is interpreted as the *final* scene after the action
+    # (start = init_gs.ply, end = pred[0]).  Expand to a trivial 2-frame
+    # trajectory so ADE/FDE compare end-to-end rather than self-to-self.
+    if T_pred == 1:
+        from .aggregate import _load_init_mu
+        init_world = _load_init_mu(traj_dir, n_points=int(pred_mu.shape[1]))
+        if init_world is not None:
+            init_centroid_world = init_world[mask].mean(axis=0) if mask.any() \
+                                  else init_world.mean(axis=0)
+            init_kpts_world = init_world[part_keypoints_indices(
+                init_world[None], mask, n_kpts=n_kpts,
+            )]
+            pred_centroid = np.stack([init_centroid_world, pred_centroid[0]], axis=0)
+            pred_kpts = np.stack([init_kpts_world, pred_kpts[0]], axis=0)
+            T_pred = 2
 
     # ── GT side: same shape, computed by FK ──
     init_centroid = pred_centroid[0]

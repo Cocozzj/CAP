@@ -61,6 +61,32 @@ def part_centroid_trajectory(
     return sub.mean(axis=1)
 
 
+def part_keypoints_indices(
+    mu:        np.ndarray,         # [T, N, 3]
+    mask:      np.ndarray,         # [N] bool
+    n_kpts:    int = 4,
+) -> np.ndarray:
+    """Compute the n_kpts Gaussian indices (corners of moving part's AABB)."""
+    if not mask.any():
+        # All-fallback: 4 spatial-extreme Gaussians of the whole cloud
+        order = mu[0].std(axis=-1).argsort()[::-1][:n_kpts]
+        return np.asarray(order, dtype=np.int64)
+    moving_idx = np.where(mask)[0]
+    sub0 = mu[0, moving_idx]                                    # [n_mov, 3]
+    # Pick 4 corners by extremes of (x+y+z), (x-y+z), (-x+y+z), (-x-y+z)
+    signs = np.array([
+        [+1, +1, +1],
+        [+1, -1, +1],
+        [-1, +1, +1],
+        [-1, -1, +1],
+    ], dtype=np.float32)[: n_kpts]
+    order = []
+    for s in signs:
+        scores = sub0 @ s
+        order.append(int(moving_idx[int(scores.argmax())]))
+    return np.asarray(order, dtype=np.int64)
+
+
 def part_keypoints(
     mu:        np.ndarray,         # [T, N, 3]
     mask:      np.ndarray,         # [N] bool
@@ -76,25 +102,7 @@ def part_keypoints(
 
     Returns [T, n_kpts, 3].
     """
-    if not mask.any():
-        # All-fallback: 4 spatial-extreme Gaussians of the whole cloud
-        idxs = mu[0]
-        order = idxs.std(axis=-1).argsort()[::-1][:n_kpts]
-    else:
-        moving_idx = np.where(mask)[0]
-        sub0 = mu[0, moving_idx]                                # [n_mov, 3]
-        # Pick 4 corners by extremes of (x+y+z), (x-y+z), (-x+y+z), (-x-y+z)
-        signs = np.array([
-            [+1, +1, +1],
-            [+1, -1, +1],
-            [-1, +1, +1],
-            [-1, -1, +1],
-        ], dtype=np.float32)[: n_kpts]
-        order = []
-        for s in signs:
-            scores = sub0 @ s
-            order.append(int(moving_idx[int(scores.argmax())]))
-        order = np.asarray(order, dtype=np.int64)
+    order = part_keypoints_indices(mu, mask, n_kpts=n_kpts)
     return mu[:, order]                                          # [T, n_kpts, 3]
 
 

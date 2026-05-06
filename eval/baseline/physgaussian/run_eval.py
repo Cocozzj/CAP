@@ -30,6 +30,61 @@ import numpy as np
 from ..common import GS4DSequence, TrajMetrics
 
 
+# ════════════════════════════════════════════════════════════════════════
+# PLY adapter:  our (sh_degree=0)  →  PhysGaussian's expected (sh_degree=3)
+# ════════════════════════════════════════════════════════════════════════
+
+def _write_sh3_padded_ply(src: Path, dst: Path) -> None:
+    """Read ``src`` (a 3DGS PLY at any SH degree) and write ``dst`` with
+    exactly 45 zero-padded ``f_rest_*`` columns so 3DGS's strict
+    ``load_ply`` (with ``max_sh_degree=3``) accepts it.
+
+    Required output columns (in this order, per gaussian_model.py):
+        x, y, z, nx, ny, nz,
+        f_dc_0, f_dc_1, f_dc_2,
+        f_rest_0 ... f_rest_44,
+        opacity,
+        scale_0, scale_1, scale_2,
+        rot_0, rot_1, rot_2, rot_3
+    Total = 3 + 3 + 3 + 45 + 1 + 3 + 4 = 62 properties.
+    """
+    from plyfile import PlyData, PlyElement
+
+    p_in = PlyData.read(str(src))
+    v_in = p_in["vertex"]
+    n_pts = len(v_in)
+
+    def col(name, default=0.0):
+        try:
+            return np.asarray(v_in[name], dtype=np.float32)
+        except (KeyError, ValueError):
+            return np.full(n_pts, default, dtype=np.float32)
+
+    # Build full property dict
+    cols = {
+        "x":  col("x"),  "y":  col("y"),  "z":  col("z"),
+        "nx": col("nx"), "ny": col("ny"), "nz": col("nz"),
+        "f_dc_0": col("f_dc_0"),
+        "f_dc_1": col("f_dc_1"),
+        "f_dc_2": col("f_dc_2"),
+    }
+    # Pad / copy 45 f_rest_*
+    for i in range(45):
+        cols[f"f_rest_{i}"] = col(f"f_rest_{i}", default=0.0)
+    cols["opacity"] = col("opacity")
+    cols["scale_0"] = col("scale_0"); cols["scale_1"] = col("scale_1"); cols["scale_2"] = col("scale_2")
+    cols["rot_0"]   = col("rot_0");   cols["rot_1"]   = col("rot_1")
+    cols["rot_2"]   = col("rot_2");   cols["rot_3"]   = col("rot_3")
+
+    dtype = [(k, "f4") for k in cols.keys()]
+    arr = np.empty(n_pts, dtype=dtype)
+    for k, v in cols.items():
+        arr[k] = v
+
+    el = PlyElement.describe(arr, "vertex")
+    PlyData([el], text=False).write(str(dst))
+
+
 def _run_physgaussian_one(
     cfg_path: Path,
     output_dir: Path,
@@ -85,7 +140,15 @@ def _run_physgaussian_one(
     target_ply = iter_dir / "point_cloud.ply"
     if target_ply.exists() or target_ply.is_symlink():
         target_ply.unlink()
-    target_ply.symlink_to(init_ply.resolve())
+
+    # PhysGaussian's load_checkpoint() hard-codes sh_degree=3, which makes
+    # 3DGS's load_ply() assert exactly 45 ``f_rest_*`` properties (= 3 ·
+    # (3+1)² − 3).  Our PLYs are sh_degree=0 (only DC), so we materialise a
+    # padded copy with 45 zero-filled f_rest columns instead of a symlink.
+    try:
+        _write_sh3_padded_ply(init_ply, target_ply)
+    except Exception as e:
+        return False, f"failed to pad PLY to sh_degree=3: {e}"
 
     cmd = [
         "python", str(physgs_repo / "gs_simulation.py"),

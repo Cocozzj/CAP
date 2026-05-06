@@ -38,10 +38,18 @@ def _run_physgaussian_one(
 ) -> tuple[bool, str]:
     """Invoke PhysGaussian's ``gs_simulation.py`` on one config.
 
-    PhysGaussian's CLI (verify against your cloned version):
+    PhysGaussian's CLI:
         python gs_simulation.py \\
-            --config <cfg.json> \\
+            --model_path <model_dir>           # 3DGS-style scene dir, REQUIRED
+            --config     <cfg.json>
             --output_path <out_dir>
+
+    --model_path must contain ``point_cloud/iteration_*/point_cloud.ply``
+    (PhysGaussian's load_checkpoint() globs for the latest ``iteration_*``).
+    Our convert_data.py only emits a single init PLY, so we wrap it in the
+    expected layout via symlink before invocation.  No cameras.json /
+    cfg_args are needed because gs_simulation.py uses load_checkpoint()
+    directly, not the full Scene() loader.
 
     Returns (success, message).  On failure, message is the exception/error
     string for logging.
@@ -52,10 +60,39 @@ def _run_physgaussian_one(
     ``from utils.sh_utils import eval_sh`` resolves.
     """
     import os
+
+    # ── Build fake 3DGS model_path layout ──────────────────────────────────
+    # convert_data.py wrote the absolute init-PLY path into cfg["model_path"];
+    # PhysGaussian's CLI uses --model_path (which must be a *directory*), so
+    # we rebuild the expected ``point_cloud/iteration_30000/point_cloud.ply``
+    # tree and symlink the init PLY into it.
+    try:
+        cfg = json.loads(cfg_path.read_text())
+    except Exception as e:
+        return False, f"failed to read cfg json: {e}"
+    init_ply_str = cfg.get("model_path")
+    if not init_ply_str:
+        return False, "cfg has no 'model_path' field (init PLY path)"
+    init_ply = Path(init_ply_str).expanduser()
+    if not init_ply.exists():
+        return False, f"init PLY not found: {init_ply}"
+
+    # output_dir == traj_dir/physgs_raw  →  traj_dir == output_dir.parent
+    traj_dir = output_dir.parent
+    model_dir = traj_dir / "physgs_model"
+    iter_dir = model_dir / "point_cloud" / "iteration_30000"
+    iter_dir.mkdir(parents=True, exist_ok=True)
+    target_ply = iter_dir / "point_cloud.ply"
+    if target_ply.exists() or target_ply.is_symlink():
+        target_ply.unlink()
+    target_ply.symlink_to(init_ply.resolve())
+
     cmd = [
         "python", str(physgs_repo / "gs_simulation.py"),
-        "--config",     str(cfg_path),
+        "--model_path",  str(model_dir),
+        "--config",      str(cfg_path),
         "--output_path", str(output_dir),
+        "--output_ply",                              # we need PLYs to parse back
     ]
     env = dict(os.environ)
     extra_paths = [

@@ -58,15 +58,53 @@ from ..common import (
 
 def load_model(ckpt_path: Path | str, config_path: Path | str,
                 device: torch.device) -> CAPModel:
-    """Load Ours' CAPModel from a checkpoint."""
+    """Load Ours' CAPModel from a checkpoint, with sentence-transformers
+    key remapping.
+
+    sentence-transformers' internal Transformer module renamed its
+    attribute ``self.model`` (older versions) to ``self.auto_model``
+    (newer versions).  All ~199 language-encoder keys differ only by
+    that single component:
+
+        planner.lang.text_enc.model.0.model.*       ← old (training-time)
+        planner.lang.text_enc.model.0.auto_model.*  ← new (inference-time)
+
+    We strict-rename the ckpt keys so load_state_dict succeeds.
+    """
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
     model = CAPModel(cfg).to(device)
     state = torch.load(str(ckpt_path), map_location=str(device))
-    msg = model.load_state_dict(state["model"], strict=False)
+    raw_sd = state["model"]
+
+    # Detect which side has the obsolete name and remap.
+    target_keys = set(model.state_dict().keys())
+    has_old = any(".model.0.model." in k for k in raw_sd.keys())
+    needs_new = any(".model.0.auto_model." in k for k in target_keys)
+    if has_old and needs_new:
+        remapped = {}
+        n = 0
+        for k, v in raw_sd.items():
+            if ".model.0.model." in k:
+                k2 = k.replace(".model.0.model.", ".model.0.auto_model.")
+                n += 1
+            else:
+                k2 = k
+            remapped[k2] = v
+        if n:
+            print(f"  ⏬ remapped {n} sentence-transformers keys "
+                  f"(model → auto_model)")
+        raw_sd = remapped
+
+    msg = model.load_state_dict(raw_sd, strict=False)
     if msg.missing_keys or msg.unexpected_keys:
         print(f"  ⚠ load_state_dict — missing: {len(msg.missing_keys)}, "
               f"unexpected: {len(msg.unexpected_keys)}")
+        # Show first few of each so we can spot any *other* mismatch
+        if msg.missing_keys:
+            print(f"    missing[:3]:    {msg.missing_keys[:3]}")
+        if msg.unexpected_keys:
+            print(f"    unexpected[:3]: {msg.unexpected_keys[:3]}")
     model.eval()
     return model
 

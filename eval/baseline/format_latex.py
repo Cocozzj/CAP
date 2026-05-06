@@ -55,12 +55,12 @@ _PAPER_NAME = {
     # is not included; its per-scene optimization at ~30 min/traj is
     # infeasible at our 1300+ trajectory evaluation scale.
     "svd":          "Stable Video Diffusion",
-    "magvit_v2":    "MAGVIT-v2",
     "motiongpt":    "MotionGPT",
     "ours":         "\\textbf{Ours}",
     # Backward-compat names (only render if data exists; default row order
     # excludes them).  Useful for ablation/supplementary tables that may
     # still reference the old/legacy baselines.
+    "magvit_v2":    "MAGVIT-v2 (excluded)",
     "flat_vqvae":   "Flat VQ-VAE",
     "tamp_rule":    "TAMP-rule (legacy)",
     "_4dgs":        "4D-GS (legacy)",

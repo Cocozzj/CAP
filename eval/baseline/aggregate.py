@@ -309,12 +309,13 @@ def main(argv: List[str] | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--baselines", nargs="+",
                    default=["tamp_pddl", "physgaussian", "svd",
-                            "magvit_v2", "motiongpt", "ours"],
-                   help="which baselines to aggregate (paper's 5 external "
-                        "baselines + Ours).  'svd' is a generic video-"
-                        "diffusion baseline — see eval/baseline/svd/README.md "
-                        "(PhysDreamer is excluded due to its per-scene "
-                        "optimization cost being infeasible at our scale).")
+                            "motiongpt", "ours"],
+                   help="which baselines to aggregate (4 external + Ours).  "
+                        "PhysDreamer (per-scene optimization at our scale) "
+                        "and MAGVIT-v2 (lucidrains' implementation has an "
+                        "unstable transformer-side API; the pixel-level "
+                        "video baseline niche is already covered by SVD) "
+                        "are intentionally excluded.")
     p.add_argument("--output-root", default="runs/baselines")
     p.add_argument("--data-root", default="dataset",
                    help="root containing dataset_a/data/<traj>, dataset_b/data/<traj>")

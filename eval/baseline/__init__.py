@@ -1,6 +1,6 @@
 """External baselines for the paper's main results table.
 
-5-baseline matrix (paper §4 main table):
+4-baseline matrix (paper §4 main table):
 
   tamp_pddl       Symbolic decompose + motion primitives (PDDLStream
                   itself wasn't installable on the eval cluster — the
@@ -9,11 +9,16 @@
   svd             Stable Video Diffusion zero-shot image-to-video —
                   generic generative video prior baseline.  Pixel-only
                   output, so 3D metrics report N/A.  See svd/README.md.
-                  PhysDreamer is not included; its per-scene optimization
-                  (~30 min/scene) is infeasible at our 1300+ trajectory
-                  evaluation scale.
-  magvit_v2       Pixel-level video tokenizer (trained on our data)
-  motiongpt       Pretrained T5 + motion VQ tokens (fine-tuned on our data)
+  motiongpt       T5 + motion VQ tokens (fine-tuned on our data) —
+                  motion-level tokenization baseline.
+
+Two baselines were *intentionally excluded*:
+  • PhysDreamer (Zhang et al. 2024) — per-scene optimization at
+    ~30 min/scene is infeasible across our 1300+ evaluation trajectories.
+  • MAGVIT-v2 (Yu et al. 2023) — the public implementation
+    (``lucidrains/magvit2-pytorch``) has an unstable transformer-side
+    API.  The pixel-level video baseline niche is already covered by
+    SVD, so the marginal value of debugging MAGVIT-v2 was low.
 
 Plus:
 

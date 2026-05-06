@@ -311,13 +311,17 @@ def _run_physgaussian_one(
 def _collect_physgaussian_outputs(
     physgs_out_dir: Path,
     xform: dict | None = None,
+    init_ply: Path | None = None,
 ) -> GS4DSequence | None:
     """Read PhysGaussian's per-frame PLY output and convert to GS4DSequence.
 
     PhysGaussian writes one PLY per simulated frame at:
         ``<output>/simulation_ply/sim_<10digit>.ply``
-    Each PLY uses the same property schema as the input (sh_degree=3,
-    62 columns) with updated x/y/z and rot_* per frame.
+    These per-frame PLYs only carry positions (x/y/z) and possibly rot_*
+    — SH/opacity/scale are not duplicated because they're constant under
+    MPM deformation.  We therefore read those static fields from the
+    input PLY (``init_ply`` — what we wrote into ``point_cloud/
+    iteration_30000/point_cloud.ply``) and broadcast them across T.
 
     If ``xform`` is provided (saved by ``_run_physgaussian_one`` next to
     the model dir), the simulated positions are mapped *back* from
@@ -337,43 +341,54 @@ def _collect_physgaussian_outputs(
     if N == 0:
         return None
 
+    # Per-frame positions
     mu = np.zeros((T, N, 3), dtype=np.float32)
     for t, p in enumerate(ply_files):
         v = PlyData.read(str(p))["vertex"]
         if len(v) != N:
-            # Particle count drifted between frames — bail rather than
-            # silently corrupt the metric.  (Shouldn't happen with MPM
-            # but PhysGaussian's particle_filling can change N.)
             return None
         mu[t, :, 0] = np.asarray(v["x"], dtype=np.float32)
         mu[t, :, 1] = np.asarray(v["y"], dtype=np.float32)
         mu[t, :, 2] = np.asarray(v["z"], dtype=np.float32)
 
-    # Inverse transform back to source coordinate frame.
+    # Inverse-transform positions back to source coordinate frame.
     if xform is not None:
         src_center = np.asarray(xform["src_center"], dtype=np.float32)
         target_center = np.asarray(xform["target_center"], dtype=np.float32)
         scale = float(xform["scale"])
         mu = (mu - target_center) / max(scale, 1e-6) + src_center
 
-    # Static appearance — PhysGaussian doesn't update SH/opacity/scale per
-    # frame (only positions and orientations), so broadcast frame 0.
-    sh0 = np.stack([
-        np.asarray(v0["f_dc_0"], dtype=np.float32),
-        np.asarray(v0["f_dc_1"], dtype=np.float32),
-        np.asarray(v0["f_dc_2"], dtype=np.float32),
-    ] + [np.asarray(v0[f"f_rest_{i}"], dtype=np.float32) for i in range(45)],
-        axis=1)  # (N, 48)
-    opacity0 = np.asarray(v0["opacity"], dtype=np.float32)  # (N,)
-    scale0 = np.stack([
-        np.asarray(v0["scale_0"], dtype=np.float32),
-        np.asarray(v0["scale_1"], dtype=np.float32),
-        np.asarray(v0["scale_2"], dtype=np.float32),
-    ], axis=1)  # (N, 3)
+    # Static appearance — read from the input PLY we wrote pre-simulation.
+    # We deliberately use the *original* (untransformed) PLY so SH/opacity/
+    # scale are in the source coordinate frame; if init_ply not given,
+    # fall back to whatever the sim PLY happens to contain (best-effort).
+    def _read_static(path: Path):
+        v_in = PlyData.read(str(path))["vertex"]
+        n = len(v_in)
+        def col(name, default=0.0):
+            try:
+                return np.asarray(v_in[name], dtype=np.float32)
+            except (KeyError, ValueError):
+                return np.full(n, default, dtype=np.float32)
+        f_dc = np.stack([col("f_dc_0"), col("f_dc_1"), col("f_dc_2")], axis=1)
+        # high-order SH (45 channels) — pad zero if the source PLY doesn't have it
+        f_rest = np.stack([col(f"f_rest_{i}") for i in range(45)], axis=1)
+        sh_full = np.concatenate([f_dc, f_rest], axis=1)  # (n, 48)
+        opa = col("opacity")
+        sc = np.stack([col("scale_0"), col("scale_1"), col("scale_2")], axis=1)
+        return sh_full, opa, sc, n
 
-    # Inverse-scale the gaussian sigmas too (log-space).
-    if xform is not None:
-        scale0 = scale0 - float(np.log(max(xform["scale"], 1e-6)))
+    src_ply = init_ply if (init_ply is not None and init_ply.exists()) else ply_files[0]
+    sh0, opacity0, scale0, n_static = _read_static(src_ply)
+
+    # If the static PLY has a different point count from the simulated
+    # output, fall back to broadcast from frame-0 of the sim (no static
+    # info available).  This shouldn't happen with our pipeline because
+    # we don't use particle_filling, but be defensive.
+    if n_static != N:
+        sh0     = np.zeros((N, 48),    dtype=np.float32)
+        opacity0 = np.zeros((N,),      dtype=np.float32)
+        scale0  = np.zeros((N, 3),     dtype=np.float32)
 
     cov_full = np.eye(3, dtype=np.float32)[None, None].repeat(T, axis=0).repeat(N, axis=1)
 
@@ -450,7 +465,17 @@ def main(argv: List[str] | None = None) -> int:
                     xform = json.loads(xform_path.read_text())
                 except Exception:
                     pass
-            seq = _collect_physgaussian_outputs(physgs_out, xform=xform)
+            # Original (pre-transform) PLY for static SH/opacity/scale.
+            init_ply = None
+            try:
+                cfg_data = json.loads(cfg_path.read_text())
+                if cfg_data.get("model_path"):
+                    init_ply = Path(cfg_data["model_path"]).expanduser()
+            except Exception:
+                pass
+            seq = _collect_physgaussian_outputs(
+                physgs_out, xform=xform, init_ply=init_ply,
+            )
             if seq is None:
                 TrajMetrics(notes="physgs_output_parse_failed").save(traj_dir / "metrics.json")
                 failed += 1

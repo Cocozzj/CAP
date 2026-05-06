@@ -42,7 +42,7 @@ for K in $KS; do
         CFG="configs/config.yaml"
     else
         CK="${SWEEP_DIR}/K${K}/seed_${SEED}/ckpt/main_exp_final.pt"
-        CFG="configs/_ksweep/config_K${K}.yaml"
+        CFG="${SWEEP_DIR}/K${K}/config.yaml"     # K-specific config saved by train_sweep.sh
     fi
     if [[ ! -f "$CK" ]]; then
         echo "WARN: K=${K} ckpt missing: $CK  — skipping"

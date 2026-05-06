@@ -16,7 +16,10 @@ set -euo pipefail
 # ─── Configurable knobs ─────────────────────────────────────────────────
 VARIANTS="${VARIANTS:-no_hier no_algebraic no_cvae no_physics no_equivariance no_lipschitz}"
 SEED="${SEED:-0}"
-MAX_EPOCHS="${MAX_EPOCHS:-80}"        # ablation default: 80 ep (main is 150)
+# Per-stage epochs for ablation: 25/20/20/35 = 100 total (vs main 35/35/25/55=150).
+# Preserves curriculum shape: FULL stays the largest stage.
+STAGE_EPOCHS="${STAGE_EPOCHS:-25 20 20 35}"
+MAX_EPOCHS="${MAX_EPOCHS:-}"          # empty by default; mutually exclusive with STAGE_EPOCHS
 BATCH_SIZE="${BATCH_SIZE:-8}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-8}"
@@ -70,7 +73,12 @@ for V in $VARIANTS; do
             [[ -n "$line" ]] && EXTRA_FLAGS+=("$line")
         done < "${CFG_DIR}/trainer_flags.txt"
     fi
-    if [[ -n "$MAX_EPOCHS" ]]; then
+    # --stage-epochs takes precedence; --max-epochs is the uniform-cap fallback
+    # (mutually exclusive in trainer.py).
+    if [[ -n "$STAGE_EPOCHS" ]]; then
+        EXTRA_FLAGS+=(--stage-epochs)
+        for ep in $STAGE_EPOCHS; do EXTRA_FLAGS+=("$ep"); done
+    elif [[ -n "$MAX_EPOCHS" ]]; then
         EXTRA_FLAGS+=(--max-epochs "$MAX_EPOCHS")
     fi
 

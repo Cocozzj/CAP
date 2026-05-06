@@ -6,15 +6,16 @@
 # closure / inverse / commutator have exact GT.  The pre-trained main
 # checkpoints at runs/main_a/seed_{0,1,2}/ provide the baseline row.
 #
-# Sequential on 8 GPUs.  Wall-clock estimate on 8×H100 with 80 ep ablations:
+# Sequential on 8 GPUs.  Wall-clock estimate on 8×H100 (smoke-measured ~48s/ep avg).
+# Ablations use 100 ep (MAX_EPOCHS=25 per stage); main was 150 ep.
 #
-#   K-sweep    (4 K × ~2.7 h A train @ 80ep + eval)    = ~12 h   (K=2048 skipped)
-#   Module A   (6 var × ~2.7 h A train @ 80ep)         = ~16 h
-#   Module evals                                       =  ~1 h
-#   Loss A     (6 var × ~2.7 h A train @ 80ep)         = ~16 h
-#   Loss evals                                         =  ~1 h
-#                                                        ─────
-#                                                        ~46 h ≈ 2 days
+#   K-sweep    (4 K × ~1.3 h A train @ 100ep + eval)    =  ~6 h   (K=2048 skipped)
+#   Module A   (6 var × ~1.3 h A train @ 100ep)         =  ~8 h
+#   Module evals                                        =  ~1 h
+#   Loss A     (6 var × ~1.3 h A train @ 100ep)         =  ~8 h
+#   Loss evals                                          =  ~1 h
+#                                                         ─────
+#                                                         ~24 h ≈ 1 day
 #
 # Resumable: each individual variant has an "idempotency check" — if its
 # ckpt already exists, the loop skips it.  ctrl-C and restart freely.

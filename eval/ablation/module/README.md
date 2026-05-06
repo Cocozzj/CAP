@@ -14,7 +14,7 @@
 | `no_equivariance` | SE(3) 等变 loss | `lambda_eq = lambda_eq_cross = 0` |
 | `no_lipschitz` | spectral-norm 正则的 loss 项 | `lambda_lip = 0` |
 
-每个变体 A 训 **80 epoch**（默认 `MAX_EPOCHS=80`，main 是 150 ep）。**不在 B 上 fine-tune**——消融对象是架构 / loss 设计，dataset-agnostic。
+每个变体 A 训 **100 epoch 总**（默认 `STAGE_EPOCHS="25 20 20 35"`，对应 RIGID/PLANNER/PHYSICS/FULL；main 是 150 ep / 35-35-25-55）。**不在 B 上 fine-tune**——消融对象是架构 / loss 设计，dataset-agnostic。
 
 ## 文件清单
 
@@ -67,9 +67,9 @@ VARIANTS="no_lipschitz" MAX_EPOCHS=2 \
 
 | 阶段 | 单 variant | × 6 variants | 总 |
 |---|---|---|---|
-| Train A (80 ep, 默认) | ~2.7 h | 16 h | **16 h** |
+| Train A (100 ep, 默认) | ~1.3 h | 8 h | **8 h** |
 | Eval (4 项 × A) | ~10 min | 1 h | **1 h** |
-| **TOTAL** | | | **~17 GPU·h ≈ 0.7 wall-clock 天** |
+| **TOTAL** | | | **~9 GPU·h ≈ 0.4 wall-clock 天** |
 
 并行说一下：6 个 A train 互不依赖，可以**多机并行**或**1×H100/seed 跑 6 个**（batch 减小到 2-4）。但 sequential 更稳，1.3 天等得起。
 

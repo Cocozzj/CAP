@@ -24,6 +24,10 @@
 ├── runs/main_a/seed_0/...          # 已有 K=512 main 模型（3 seeds）
 ├── runs/finetune_b/seed_0/...      # 已有 B fine-tune
 └── runs/ksweep/K{N}/               # ← sweep 输出（与 main_a 同级）
+    ├── config.yaml                 # K-specific patched config
+    └── seed_0/
+        ├── ckpt/main_exp_final.pt
+        └── train.log
 ```
 
 ## 使用流程
@@ -47,8 +51,8 @@ python eval/ablation/ksweep/plot_theorem1.py \
 
 - **默认 K = {64, 128, 256, 1024}**（4 个新点 + 已有 K=512 = **5 个拟合点**；K=2048 跳过）
 - **每个 K 跑 1 seed**（按方案"主表 3 seeds，其他 1 seed"惯例）
-- **80 epoch**（默认，main 是 150 ep）；想跑全 150 ep 用 `MAX_EPOCHS=150 bash ...`
-- **8 GPU per run**。Sequential 总成本 ~4 × ~2.7 h ≈ **~12 GPU·hour**（约 0.5 GPU·day）
+- **100 epoch 总**（默认 `STAGE_EPOCHS="25 20 20 35"`，对应 RIGID/PLANNER/PHYSICS/FULL；main 是 150 ep）；跑全 150 ep 用 `STAGE_EPOCHS= MAX_EPOCHS= bash ...`
+- **8 GPU per run**。Sequential 总成本 ~4 × ~1.3 h ≈ **~6 GPU·h**（约 0.25 GPU·day）
 
 ## 期望输出（论文素材）
 

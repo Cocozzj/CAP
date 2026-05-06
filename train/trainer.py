@@ -826,6 +826,11 @@ def _parse_args() -> argparse.Namespace:
                    help="Cap each stage's epoch count at this value (useful for "
                         "mini sanity-runs without editing stages.py).  Composes "
                         "with --smoke: whichever is smaller wins per stage.")
+    p.add_argument("--stage-epochs",  nargs="+", type=int, default=None,
+                   help="Per-stage epoch override.  E.g. ``--stage-epochs 25 20 20 35`` "
+                        "for a 100-epoch ablation budget (vs main 35/35/25/55=150). "
+                        "List length must match the selected stages-preset (4 for A, "
+                        "1 for B).  Mutually exclusive with --max-epochs.")
     p.add_argument("--stages-preset", type=str, default="a",
                    choices=["a", "b"],
                    help="a = DEFAULT_STAGES (4-stage curriculum, 150ep, for Dataset-A), "
@@ -1106,6 +1111,16 @@ def main():
         if args.smoke and is_main_proc:
             print("⚡ SMOKE mode: 1 epoch per stage")
 
+    # --max-epochs and --stage-epochs are mutually exclusive: --max-epochs
+    # caps every stage at the same value; --stage-epochs sets each stage
+    # explicitly.  Erroring early avoids a silent precedence bug.
+    if args.max_epochs is not None and args.stage_epochs is not None:
+        raise SystemExit(
+            "Error: --max-epochs and --stage-epochs are mutually exclusive.\n"
+            "  Use --max-epochs N for a uniform per-stage cap, or\n"
+            "       --stage-epochs N1 N2 ... for explicit per-stage epochs."
+        )
+
     # --max-epochs: cap per-stage epoch count for mini sanity-runs.
     # Implemented AFTER smoke selection so it composes naturally — if both are
     # set, each stage gets min(smoke_epochs=1, max_epochs).  Uses dataclasses.replace
@@ -1120,6 +1135,26 @@ def main():
         if is_main_proc:
             print(f"⏱  --max-epochs={args.max_epochs}: "
                   f"per-stage epochs = {[s.epochs for s in stage_schedule]}")
+
+    # --stage-epochs: explicit per-stage epoch list (e.g. 25 20 20 35 → 100
+    # total).  Useful for ablations that want to preserve curriculum shape
+    # (RIGID > PHYSICS, FULL = largest) while still cutting overall budget.
+    if args.stage_epochs is not None:
+        if len(args.stage_epochs) != len(stage_schedule):
+            raise SystemExit(
+                f"Error: --stage-epochs has {len(args.stage_epochs)} values but "
+                f"stages-preset {args.stages_preset!r} has {len(stage_schedule)} "
+                f"stages ({[s.name for s in stage_schedule]})."
+            )
+        if any(e <= 0 for e in args.stage_epochs):
+            raise SystemExit("Error: --stage-epochs entries must be positive integers.")
+        stage_schedule = [
+            dc_replace(s, epochs=ep)
+            for s, ep in zip(stage_schedule, args.stage_epochs)
+        ]
+        if is_main_proc:
+            print(f"⏱  --stage-epochs: per-stage epochs = "
+                  f"{[s.epochs for s in stage_schedule]} (total {sum(args.stage_epochs)})")
 
     # --no-physics / --no-kl-anneal: ablation flags that flip per-stage
     # behaviour.  Implemented as in-memory rewrites of the schedule (rather

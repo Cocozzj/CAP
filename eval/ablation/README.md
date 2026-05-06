@@ -21,7 +21,7 @@ cd /workspace/CAP
 nohup bash eval/ablation/run_all.sh > runs/ablation_master.log 2>&1 &
 ```
 
-8×H100 上预计 **~46 GPU·h ≈ 2 天**（80 ep ablation × {4 K + 6 module + 6 loss}）。Resumable（每个 variant 检查 ckpt 是否已存在，跳过已完成的）。
+8×H100 上预计 **~24 GPU·h ≈ 1 天**（100 ep ablation × {4 K + 6 module + 6 loss}，smoke 实测 ~48s/ep 平均）。Resumable（每个 variant 检查 ckpt 是否已存在，跳过已完成的）。
 
 ## 单 phase 跑
 
@@ -50,12 +50,26 @@ python eval/ablation/loss/aggregate.py
 
 | Phase | 变体数 | 训练目标 | 论文输出 |
 |---|---|---|---|
-| ksweep | 4 (K=64/128/256/1024，K=512 复用 main，K=2048 跳过)| A only, 80 ep | Fig 3 + d 的实测值 |
-| module | 6 | A only, 80 ep | **Tab 6 主消融** |
-| loss   | 6 | A only, 80 ep | Tab S1 附录 |
+| ksweep | 4 (K=64/128/256/1024，K=512 复用 main，K=2048 跳过)| A only, **100 ep** | Fig 3 + d 的实测值 |
+| module | 6 | A only, **100 ep** | **Tab 6 主消融** |
+| loss   | 6 | A only, **100 ep** | Tab S1 附录 |
 | **合计** | **16** | | |
 
-**注意**：ablation 80 ep < main 150 ep。这点会写在 paper 脚注。如果想更对称（也跑 150 ep），改 `MAX_EPOCHS=` 或在 yaml 里删 `MAX_EPOCHS` 默认值。
+**注意**：ablation 100 ep < main 150 ep（节省 ~33% wallclock）。默认用 `STAGE_EPOCHS="25 20 20 35"` 显式分配每个 stage：
+
+| Stage | 原 ep (main) | ablation (100 ep 总) | 比例 |
+|---|---|---|---|
+| RIGID | 35 | 25 | -29% |
+| PLANNER | 35 | 20 | -43% |
+| PHYSICS | 25 | 20 | -20% |
+| FULL | 55 | **35** | -36% |
+
+特意保留 FULL 仍是最大的 stage，因为它是模型整体 fine-tune 的关键阶段。
+
+**改 epoch 预算的方式**：
+- 跑 full 150 ep（跟 main 完全对称）：`STAGE_EPOCHS= MAX_EPOCHS= bash ...`
+- 改其他比例：`STAGE_EPOCHS="20 20 20 40" bash ...`
+- 改成 uniform cap：`STAGE_EPOCHS= MAX_EPOCHS=20 bash ...`
 
 加上已有的 main 模型（3 seed × A，B finetune 不参与 ablation 比较），论文一共 ~17 个 run 进表。
 

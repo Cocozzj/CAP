@@ -17,7 +17,12 @@ set -euo pipefail
 # ─── Configurable knobs (env-var overridable) ─────────────────────────
 KS="${KS:-64 128 256 1024}"            # K=512 reused from runs/main_a; K=2048 skipped
 SEED="${SEED:-0}"
-MAX_EPOCHS="${MAX_EPOCHS:-80}"         # ablation default: 80 ep (vs main 150 ep)
+# Per-stage epochs for ablation: 25/20/20/35 = 100 total (vs main 35/35/25/55=150).
+# Preserves curriculum shape: FULL is still the largest stage (35), reflecting
+# its role as the "settle everything together" phase.  Override via env var or
+# set STAGE_EPOCHS= (empty) + MAX_EPOCHS= (empty) for full main 150 ep.
+STAGE_EPOCHS="${STAGE_EPOCHS:-25 20 20 35}"
+MAX_EPOCHS="${MAX_EPOCHS:-}"           # empty by default; mutually exclusive with STAGE_EPOCHS
 BATCH_SIZE="${BATCH_SIZE:-8}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-8}"
@@ -28,9 +33,9 @@ MANIFEST="${MANIFEST:-dataset/dataset_a/manifest.json}"
 DATA_DIR="${DATA_DIR:-dataset/dataset_a/data}"
 
 # Where ksweep outputs go.  Flat under runs/ to match main_a / finetune_b
-# siblings (instead of nested under runs/ablation/).
+# siblings (instead of nested under runs/ablation/).  The patched config is
+# saved alongside each K's ckpts so the run is fully self-contained.
 ROOT_OUT="${ROOT_OUT:-runs/ksweep}"
-CFG_DIR="${CFG_DIR:-configs/_ksweep}"
 
 # ─── Sanity: must run from CAP root (where configs/ and train/ live) ──
 if [[ ! -d configs ]] || [[ ! -d train ]] || [[ ! -d eval ]]; then
@@ -43,22 +48,24 @@ fi
 find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 find . -name "*.pyc" -delete 2>/dev/null || true
 
-mkdir -p "$ROOT_OUT" "$CFG_DIR"
+mkdir -p "$ROOT_OUT"
 
 # ─── Pretty banner ──────────────────────────────────────────────────────
 echo "=================================================================="
 echo "  K-sweep training"
-echo "    K values   : $KS"
-echo "    seed       : $SEED"
-echo "    max_epochs : ${MAX_EPOCHS:-<curriculum default>}"
-echo "    batch / GPU: $BATCH_SIZE  (× $NPROC_PER_NODE GPU)"
-echo "    out root   : $ROOT_OUT"
+echo "    K values    : $KS"
+echo "    seed        : $SEED"
+echo "    stage_epochs: ${STAGE_EPOCHS:-<curriculum default>}"
+echo "    max_epochs  : ${MAX_EPOCHS:-<unset>}"
+echo "    batch / GPU : $BATCH_SIZE  (× $NPROC_PER_NODE GPU)"
+echo "    out root    : $ROOT_OUT"
 echo "=================================================================="
 
 # ─── Loop over K values ───────────────────────────────────────────────
 for K in $KS; do
-    OUT_DIR="${ROOT_OUT}/K${K}/seed_${SEED}"
-    CFG_OUT="${CFG_DIR}/config_K${K}.yaml"
+    K_DIR="${ROOT_OUT}/K${K}"
+    OUT_DIR="${K_DIR}/seed_${SEED}"
+    CFG_OUT="${K_DIR}/config.yaml"          # K-specific config lives alongside ckpts
     LOG="${OUT_DIR}/train.log"
 
     if [[ -f "${OUT_DIR}/ckpt/main_exp_final.pt" ]]; then
@@ -78,9 +85,13 @@ for K in $KS; do
         --out  "$CFG_OUT"
 
     # 2) Train.  Stage preset 'a' = DEFAULT_STAGES (4-stage A curriculum, 150 ep).
-    #    Optional --max-epochs caps each stage for cheaper sweeps.
+    #    --stage-epochs gives explicit per-stage budget; --max-epochs is the
+    #    uniform cap fallback.  Mutually exclusive (trainer.py errors if both).
     EXTRA_ARGS=()
-    if [[ -n "$MAX_EPOCHS" ]]; then
+    if [[ -n "$STAGE_EPOCHS" ]]; then
+        EXTRA_ARGS+=(--stage-epochs)
+        for ep in $STAGE_EPOCHS; do EXTRA_ARGS+=("$ep"); done
+    elif [[ -n "$MAX_EPOCHS" ]]; then
         EXTRA_ARGS+=(--max-epochs "$MAX_EPOCHS")
     fi
 

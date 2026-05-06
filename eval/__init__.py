@@ -10,8 +10,10 @@ Each module corresponds to one inference protocol from the PDFs:
 
 Each script can be run standalone:
     python -m eval.text_conditioned --ckpt runs/main_exp/ckpt/main_exp_final.pt
+
+NOTE: We deliberately do NOT eagerly import ``metrics.py`` here.  Doing so
+would pull in the full ``model.*`` chain (transformers, timm, lpips, ...)
+even when running lightweight wrappers like ``eval.baseline.physgaussian``
+that only need numpy / json / plyfile.  Each script imports what it needs.
 """
-
-from .metrics import psnr, lpips_score, scene_distance_metric
-
-__all__ = ["psnr", "lpips_score", "scene_distance_metric"]
+__all__: list = []

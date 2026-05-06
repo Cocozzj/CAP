@@ -252,6 +252,11 @@ def _run_physgaussian_one(
     except Exception as e:
         return False, f"failed to patch config: {e}"
 
+    # Persist xform so the collector can apply the inverse transform on
+    # the simulated trajectory (PhysGaussian operates in [0,2]³ MPM space;
+    # GT and our metrics expect the original PartNet coordinate frame).
+    (model_dir / "xform.json").write_text(json.dumps(xform, indent=2))
+
     # 3. gs_simulation.py's get_camera_view() opens ``model_path/cameras.json``
     #    every frame even when --render_img is off (rasterizer is built
     #    inside the simulation loop).  With default_camera_index=-1 only
@@ -303,63 +308,81 @@ def _run_physgaussian_one(
     return True, "ok"
 
 
-def _collect_physgaussian_outputs(physgs_out_dir: Path) -> GS4DSequence | None:
-    """Read whatever PhysGaussian wrote and convert to our GS4DSequence.
+def _collect_physgaussian_outputs(
+    physgs_out_dir: Path,
+    xform: dict | None = None,
+) -> GS4DSequence | None:
+    """Read PhysGaussian's per-frame PLY output and convert to GS4DSequence.
 
-    PhysGaussian's exact output schema (verify against your version):
-      - ``frames/frame_000.ply, frame_001.ply, ...`` per-timestep PLYs, OR
-      - ``simulation.npz`` with arrays ``mu, cov, ...``
+    PhysGaussian writes one PLY per simulated frame at:
+        ``<output>/simulation_ply/sim_<10digit>.ply``
+    Each PLY uses the same property schema as the input (sh_degree=3,
+    62 columns) with updated x/y/z and rot_* per frame.
 
-    This stub tries both.  Adjust to whatever your version actually writes.
+    If ``xform`` is provided (saved by ``_run_physgaussian_one`` next to
+    the model dir), the simulated positions are mapped *back* from
+    PhysGaussian's [0,2]³ MPM space into the original PartNet coordinate
+    frame so downstream metrics match GT.
     """
-    # Schema 1: per-frame PLY files
-    ply_files = sorted(physgs_out_dir.glob("frames/frame_*.ply"))
-    if ply_files:
-        try:
-            from dataload.common import load_init_gs_ply
-        except ImportError:
+    from plyfile import PlyData
+
+    ply_files = sorted((physgs_out_dir / "simulation_ply").glob("sim_*.ply"))
+    if not ply_files:
+        return None
+
+    T = len(ply_files)
+    first = PlyData.read(str(ply_files[0]))
+    v0 = first["vertex"]
+    N = len(v0)
+    if N == 0:
+        return None
+
+    mu = np.zeros((T, N, 3), dtype=np.float32)
+    for t, p in enumerate(ply_files):
+        v = PlyData.read(str(p))["vertex"]
+        if len(v) != N:
+            # Particle count drifted between frames — bail rather than
+            # silently corrupt the metric.  (Shouldn't happen with MPM
+            # but PhysGaussian's particle_filling can change N.)
             return None
+        mu[t, :, 0] = np.asarray(v["x"], dtype=np.float32)
+        mu[t, :, 1] = np.asarray(v["y"], dtype=np.float32)
+        mu[t, :, 2] = np.asarray(v["z"], dtype=np.float32)
 
-        T = len(ply_files)
-        # Read first to learn N
-        first = load_init_gs_ply(ply_files[0], n_points=10000, seed=0, c_sh=48)
-        N = int(first.mu.shape[0])
+    # Inverse transform back to source coordinate frame.
+    if xform is not None:
+        src_center = np.asarray(xform["src_center"], dtype=np.float32)
+        target_center = np.asarray(xform["target_center"], dtype=np.float32)
+        scale = float(xform["scale"])
+        mu = (mu - target_center) / max(scale, 1e-6) + src_center
 
-        mu = np.zeros((T, N, 3), dtype=np.float32)
-        for t, p in enumerate(ply_files):
-            gs = load_init_gs_ply(p, n_points=N, seed=0, c_sh=48)
-            mu[t] = gs.mu.numpy()
-        # Reuse first frame's cov/sh/opacity/scale as broadcast (PhysGaussian
-        # may not write them per-frame; verify in your version)
-        cov0     = first.cov.numpy()  # placeholder, may need conversion
-        sh0      = first.sh.numpy()
-        opacity0 = first.opacity.numpy()
-        scale0   = first.scale.numpy()
+    # Static appearance — PhysGaussian doesn't update SH/opacity/scale per
+    # frame (only positions and orientations), so broadcast frame 0.
+    sh0 = np.stack([
+        np.asarray(v0["f_dc_0"], dtype=np.float32),
+        np.asarray(v0["f_dc_1"], dtype=np.float32),
+        np.asarray(v0["f_dc_2"], dtype=np.float32),
+    ] + [np.asarray(v0[f"f_rest_{i}"], dtype=np.float32) for i in range(45)],
+        axis=1)  # (N, 48)
+    opacity0 = np.asarray(v0["opacity"], dtype=np.float32)  # (N,)
+    scale0 = np.stack([
+        np.asarray(v0["scale_0"], dtype=np.float32),
+        np.asarray(v0["scale_1"], dtype=np.float32),
+        np.asarray(v0["scale_2"], dtype=np.float32),
+    ], axis=1)  # (N, 3)
 
-        # Build a 3x3 cov from quat (caller's job) — for now broadcast
-        cov_full = np.eye(3, dtype=np.float32)[None, None].repeat(T, axis=0).repeat(N, axis=1)
+    # Inverse-scale the gaussian sigmas too (log-space).
+    if xform is not None:
+        scale0 = scale0 - float(np.log(max(xform["scale"], 1e-6)))
 
-        return GS4DSequence(
-            mu=mu, cov=cov_full,
-            sh=np.broadcast_to(sh0[None],      (T,) + sh0.shape).copy(),
-            opacity=np.broadcast_to(opacity0[None], (T,) + opacity0.shape).copy(),
-            scale=np.broadcast_to(scale0[None],   (T,) + scale0.shape).copy(),
-        )
+    cov_full = np.eye(3, dtype=np.float32)[None, None].repeat(T, axis=0).repeat(N, axis=1)
 
-    # Schema 2: single npz
-    npz_files = list(physgs_out_dir.glob("*.npz"))
-    if npz_files:
-        z = np.load(npz_files[0])
-        # Expected keys: mu, cov, sh, opacity, scale  (verify schema)
-        try:
-            return GS4DSequence(
-                mu=z["mu"], cov=z["cov"], sh=z["sh"],
-                opacity=z["opacity"], scale=z["scale"],
-            )
-        except KeyError:
-            return None
-
-    return None
+    return GS4DSequence(
+        mu=mu, cov=cov_full,
+        sh=np.broadcast_to(sh0[None], (T,) + sh0.shape).copy(),
+        opacity=np.broadcast_to(opacity0[None], (T,) + opacity0.shape).copy(),
+        scale=np.broadcast_to(scale0[None], (T,) + scale0.shape).copy(),
+    )
 
 
 def main(argv: List[str] | None = None) -> int:
@@ -417,8 +440,17 @@ def main(argv: List[str] | None = None) -> int:
                     print(f"  ✗ {traj_dir.name}  {msg}")
                 continue
 
-            # Convert PhysGaussian raw output → our unified GS4DSequence format
-            seq = _collect_physgaussian_outputs(physgs_out)
+            # Convert PhysGaussian raw output → our unified GS4DSequence format.
+            # Read xform written by _run_physgaussian_one so we can map mu
+            # back from MPM space to the original PartNet coordinate frame.
+            xform = None
+            xform_path = traj_dir / "physgs_model" / "xform.json"
+            if xform_path.exists():
+                try:
+                    xform = json.loads(xform_path.read_text())
+                except Exception:
+                    pass
+            seq = _collect_physgaussian_outputs(physgs_out, xform=xform)
             if seq is None:
                 TrajMetrics(notes="physgs_output_parse_failed").save(traj_dir / "metrics.json")
                 failed += 1

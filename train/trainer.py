@@ -830,6 +830,17 @@ def _parse_args() -> argparse.Namespace:
                    choices=["a", "b"],
                    help="a = DEFAULT_STAGES (4-stage curriculum, 150ep, for Dataset-A), "
                         "b = DATASET_B_STAGES (single 30ep stage, for B fine-tune from A)")
+    # Ablation knobs that flip per-stage StageSpec flags without forking
+    # stages.py.  Each one rewrites the in-memory schedule via dataclasses.replace
+    # before the run loop — see _apply_ablation_flags below.
+    p.add_argument("--no-physics", action="store_true",
+                   help="Ablation: force enable_physics=False and "
+                        "enable_physics_loss=False on every stage. "
+                        "Used by eval/ablation/module/<no_physics>.")
+    p.add_argument("--no-kl-anneal", action="store_true",
+                   help="Ablation: force loss.anneal_cvae_kl=False on every "
+                        "stage (KL stays at the fixed yaml value, no ramp). "
+                        "Used by eval/ablation/loss/<no_kl_anneal>.")
     return p.parse_args()
 
 
@@ -1109,6 +1120,32 @@ def main():
         if is_main_proc:
             print(f"⏱  --max-epochs={args.max_epochs}: "
                   f"per-stage epochs = {[s.epochs for s in stage_schedule]}")
+
+    # --no-physics / --no-kl-anneal: ablation flags that flip per-stage
+    # behaviour.  Implemented as in-memory rewrites of the schedule (rather
+    # than editing stages.py) so multiple ablations can share the same
+    # codebase and the diff lives entirely in the ablation harness.
+    if args.no_physics or args.no_kl_anneal:
+        flagged = []
+        for s in stage_schedule:
+            new_loss = s.loss
+            kw = {}
+            if args.no_physics:
+                kw["enable_physics"] = False
+                new_loss = dc_replace(
+                    new_loss,
+                    enable_physics      = False,
+                    enable_physics_loss = False,
+                )
+            if args.no_kl_anneal:
+                new_loss = dc_replace(new_loss, anneal_cvae_kl=False)
+            flagged.append(dc_replace(s, loss=new_loss, **kw))
+        stage_schedule = flagged
+        if is_main_proc:
+            tags = []
+            if args.no_physics:    tags.append("no_physics")
+            if args.no_kl_anneal:  tags.append("no_kl_anneal")
+            print(f"🧪 ablation flags: {' '.join(tags)}")
 
     # P2-5: Gumbel-softmax temperature anneal config (yaml: training.tau_schedule)
     tau_schedule = (loss_cfg.get("training", {}) or {}).get("tau_schedule")

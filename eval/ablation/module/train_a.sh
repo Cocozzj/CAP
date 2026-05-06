@@ -16,7 +16,7 @@ set -euo pipefail
 # ─── Configurable knobs ─────────────────────────────────────────────────
 VARIANTS="${VARIANTS:-no_hier no_algebraic no_cvae no_physics no_equivariance no_lipschitz}"
 SEED="${SEED:-0}"
-MAX_EPOCHS="${MAX_EPOCHS:-}"
+MAX_EPOCHS="${MAX_EPOCHS:-80}"        # ablation default: 80 ep (main is 150)
 BATCH_SIZE="${BATCH_SIZE:-8}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-8}"
@@ -100,5 +100,5 @@ done
 echo ""
 echo "═══════════════════════════════════════════════════════════════════"
 echo "  All A-side ablations trained."
-echo "  Next: bash eval/ablation/module/finetune_b.sh"
+echo "  Next: bash eval/ablation/module/eval_all.sh"
 echo "═══════════════════════════════════════════════════════════════════"

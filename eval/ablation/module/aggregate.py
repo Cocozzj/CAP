@@ -204,9 +204,9 @@ def main() -> None:
     p.add_argument("--seed",      type=int, default=0)
     p.add_argument("--variants",  nargs="+", default=variants_mod.list_variants())
     p.add_argument("--out-dir",   type=str, default="runs/module/_aggregate")
-    p.add_argument("--datasets",  nargs="+", default=["a", "b"], choices=["a", "b"],
-                   help="Which dataset halves to include (default: both). "
-                        "For A-only ablation pass --datasets a")
+    p.add_argument("--datasets",  nargs="+", default=["a"], choices=["a", "b"],
+                   help="Which dataset halves to include (default: A only). "
+                        "Pass --datasets a b if you've also run B fine-tunes.")
     p.add_argument("--main-seeds", nargs="+", type=int, default=[0, 1, 2],
                    help="Seeds of the pre-trained main model to average for "
                         "the baseline row (default: 0 1 2).")

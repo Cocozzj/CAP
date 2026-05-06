@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-KS="${KS:-64 128 256 512 1024 2048}"   # include 512 (main model) by default
+KS="${KS:-64 128 256 512 1024}"        # include 512 (main model); K=2048 skipped by default
 SEED="${SEED:-0}"
 N_BATCHES="${N_BATCHES:-16}"
 BATCH_SIZE="${BATCH_SIZE:-4}"

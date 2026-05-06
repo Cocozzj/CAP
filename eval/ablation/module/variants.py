@@ -3,15 +3,16 @@
 Each entry maps a variant *name* to:
   config_overrides  : nested dict of yaml keys to override in configs/config.yaml
   loss_overrides    : nested dict of yaml keys to override in configs/loss.yaml
-                      (and configs/loss_b.yaml for the B fine-tune)
   trainer_flags     : list of CLI flags appended to torchrun (e.g. ['--no-physics'])
   description       : human-readable, used for log banners and aggregate tables
 
 Conventions:
   - Path keys use dot-notation (e.g. ``"loss.lambda_clos"``); ``make_config.py``
     walks the dict on dump to produce the patched yaml.
-  - These ablations are applied during BOTH the A train and the B fine-tune,
-    so a single override propagates correctly across the full A→B pipeline.
+  - All ablations train on Dataset-A only (150 ep, identical to main).  The
+    B fine-tune is intentionally skipped — ablations target architectural /
+    loss design which is dataset-agnostic, and Dataset-A provides exact GT
+    for closure / inverse / commutator (B uses noisy MiDaS pseudo-depth).
   - The "main" model (no ablation) is the existing ``runs/main_a/seed_X/``
     — no entry here.
 

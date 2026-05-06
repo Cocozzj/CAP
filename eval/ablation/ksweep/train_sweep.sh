@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # train_sweep.sh — Train K-sweep variants on Dataset-A for Theorem 1 verification.
 #
-# Sweep K ∈ {64, 128, 256, 1024, 2048} sequentially.  K=512 is the existing
-# main model (`runs/main_a/seed_0/`) — *not* re-trained here.
+# Sweep K ∈ {64, 128, 256, 1024} sequentially at 80 ep.  K=512 reuses the
+# existing main model (`runs/main_a/seed_0/`, 150 ep) — not re-trained.
+# K=2048 skipped to save GPU-h; reintroduce by setting KS="64 128 256 1024 2048".
 #
 # Run from /workspace/CAP/ (or wherever CAP is checked out):
 #     bash eval/ablation/ksweep/train_sweep.sh
@@ -14,9 +15,9 @@
 set -euo pipefail
 
 # ─── Configurable knobs (env-var overridable) ─────────────────────────
-KS="${KS:-64 128 256 1024 2048}"
+KS="${KS:-64 128 256 1024}"            # K=512 reused from runs/main_a; K=2048 skipped
 SEED="${SEED:-0}"
-MAX_EPOCHS="${MAX_EPOCHS:-}"           # empty → use stages.py default (150)
+MAX_EPOCHS="${MAX_EPOCHS:-80}"         # ablation default: 80 ep (vs main 150 ep)
 BATCH_SIZE="${BATCH_SIZE:-8}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-8}"

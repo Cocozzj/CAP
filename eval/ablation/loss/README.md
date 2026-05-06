@@ -44,9 +44,9 @@ python eval/ablation/loss/aggregate.py
 
 | 阶段 | 单变体 | × 6 | 总 |
 |---|---|---|---|
-| Train A | ~5 h | 30 h | **30 h** |
+| Train A (80 ep, 默认) | ~2.7 h | 16 h | **16 h** |
 | Eval | ~10 min | 1 h | **1 h** |
-| **TOTAL** | | | **~31 GPU·h** |
+| **TOTAL** | | | **~17 GPU·h** |
 
 ## 跟 Tier 1 (module/) 的关系
 

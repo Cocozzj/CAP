@@ -45,10 +45,10 @@ python eval/ablation/ksweep/plot_theorem1.py \
 
 ## 配置选择
 
-- **默认 K = {64, 128, 256, 1024, 2048}**（4 新 + 已有 K=512 = 5 个数据点）
+- **默认 K = {64, 128, 256, 1024}**（4 个新点 + 已有 K=512 = **5 个拟合点**；K=2048 跳过）
 - **每个 K 跑 1 seed**（按方案"主表 3 seeds，其他 1 seed"惯例）
-- **150 epoch**（A 全 curriculum），需要更短跑可加 `--max-epochs N`
-- **8 GPU per run**。Sequential 总成本 ~4 × 7 h ≈ **28 GPU·hour**（约 1.2 GPU·day）
+- **80 epoch**（默认，main 是 150 ep）；想跑全 150 ep 用 `MAX_EPOCHS=150 bash ...`
+- **8 GPU per run**。Sequential 总成本 ~4 × ~2.7 h ≈ **~12 GPU·hour**（约 0.5 GPU·day）
 
 ## 期望输出（论文素材）
 

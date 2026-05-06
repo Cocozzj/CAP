@@ -1,13 +1,14 @@
 # Ablation 总入口
 
-> 三类消融 + 一键运行脚本。论文映射：PDF §5.2 / Act4D MD §3+§5.1 / Experiment.md §2.B + §3.1。
+> 三类消融 + 一键运行脚本。**全部基于 Dataset-A**，不在 B 上 fine-tune。
+> 论文映射：PDF §5.2 / Act4D MD §3+§5.1 / Experiment.md §2.B + §3.1。
 
 ## 目录布局
 
 ```
 eval/ablation/
 ├── ksweep/              # K-sweep + Theorem 1 验证（4 K + main K=512 = 5 点拟合）
-├── module/              # Tier 1: 6 个模块消融（A→B 完整流程）
+├── module/              # Tier 1: 6 个模块消融（A only）
 ├── loss/                # Tier 2: 6 个 loss-term 消融（A only）
 ├── run_all.sh           # 一键串起来：K-sweep → module → loss
 └── README.md            # 本文件
@@ -17,10 +18,10 @@ eval/ablation/
 
 ```bash
 cd /workspace/CAP
-nohup bash eval/ablation/run_all.sh > ablation_master.log 2>&1 &
+nohup bash eval/ablation/run_all.sh > runs/ablation_master.log 2>&1 &
 ```
 
-8×H100 上预计 **~86 GPU·h ≈ 3.6 天**。Resumable（每个 variant 检查 ckpt 是否已存在，跳过已完成的）。
+8×H100 上预计 **~46 GPU·h ≈ 2 天**（80 ep ablation × {4 K + 6 module + 6 loss}）。Resumable（每个 variant 检查 ckpt 是否已存在，跳过已完成的）。
 
 ## 单 phase 跑
 
@@ -34,32 +35,43 @@ python eval/ablation/ksweep/plot_theorem1.py \
     --summary runs/ksweep/_eval/summary.json \
     --output  runs/ksweep/_eval/theorem1.pdf
 
-# Phase 2: Module（Tab 6 主消融）
+# Phase 2: Module（Tab 6 主消融，A only）
 bash eval/ablation/module/train_a.sh
-bash eval/ablation/module/finetune_b.sh
 bash eval/ablation/module/eval_all.sh
 python eval/ablation/module/aggregate.py
 
-# Phase 3: Loss（附录 Tab S1）
+# Phase 3: Loss（附录 Tab S1，A only）
 bash eval/ablation/loss/train_a.sh
 bash eval/ablation/loss/eval_all.sh
 python eval/ablation/loss/aggregate.py
 ```
 
-## 总变体清单（19 个）
+## 总变体清单（16 个新 run）
 
 | Phase | 变体数 | 训练目标 | 论文输出 |
 |---|---|---|---|
-| ksweep | 4（不含 K=512 main）| A only | Fig 3 + d 的实测值 |
-| module | 6 | A + B fine-tune | **Tab 6 主消融** |
-| loss   | 6 | A only | Tab S1 附录 |
-| **合计** | **16 个新 run** | | |
+| ksweep | 4 (K=64/128/256/1024，K=512 复用 main，K=2048 跳过)| A only, 80 ep | Fig 3 + d 的实测值 |
+| module | 6 | A only, 80 ep | **Tab 6 主消融** |
+| loss   | 6 | A only, 80 ep | Tab S1 附录 |
+| **合计** | **16** | | |
 
-加上已有的 main 模型（3 seed × A + B），论文一共 ~19 个 run 进表。
+**注意**：ablation 80 ep < main 150 ep。这点会写在 paper 脚注。如果想更对称（也跑 150 ep），改 `MAX_EPOCHS=` 或在 yaml 里删 `MAX_EPOCHS` 默认值。
+
+加上已有的 main 模型（3 seed × A，B finetune 不参与 ablation 比较），论文一共 ~17 个 run 进表。
+
+## 为什么全部 A only
+
+- Dataset-A 提供精确 GT（closure / inverse / commutator 解析定义）；B 用 MiDaS 伪深度，相对噪声大
+- 消融对象是架构 / loss 设计，dataset-agnostic
+- A-only 是 NeurIPS 消融的标准做法（类似 ImageNet-only ablation）
+- 省 ~4 GPU·h，结构更对称
+
+写 paper 时正文 §5 可以加一句脚注：
+> *"All ablations trained on Dataset-A under identical curriculum and 1 seed. We focus on the synthetic setting because (i) Dataset-A provides exact GT for closure / inverse / commutator metrics, and (ii) the ablations target architectural / loss design, which is dataset-agnostic."*
 
 ## Trainer 侧依赖
 
-我在 `train/trainer.py` 加了两个 ablation flag（已 commit 到本地 4DTokenizer/CAP/train/trainer.py）：
+`train/trainer.py` 加了两个 ablation flag：
 
 - `--no-physics`：所有 stage `enable_physics=False, enable_physics_loss=False`
 - `--no-kl-anneal`：所有 stage `LossSpec.anneal_cvae_kl=False`
@@ -82,7 +94,7 @@ VARIANTS=no_lipschitz bash eval/ablation/module/train_a.sh
 
 ## 论文里的位置
 
-- **Fig 3 (Theorem 1)**：`ksweep/_eval/theorem1.pdf` 直接进 paper §5.1
-- **Tab 6 (主消融)**：`module/_aggregate/table6.md` 进 paper §5
-- **Tab S1 (loss 细消融)**：`loss/_aggregate/table_loss.md` 进 appendix
-- **Discussion**：从这三表里挑差距最大的几行写 ablation 分析（典型预期：no_algebraic 在 Δ_clos 上爆炸；no_physics 在 cross-material 上崩；no_L_comm 几乎不变 → 证明 commutator 是 soft prior）
+- **Fig 3 (Theorem 1)**：`runs/ksweep/_eval/theorem1.pdf` 直接进 paper §5.1
+- **Tab 6 (主消融)**：`runs/module/_aggregate/table6.md` 进 paper §5
+- **Tab S1 (loss 细消融)**：`runs/loss/_aggregate/table_loss.md` 进 appendix
+- **Discussion**：从这三表里挑差距最大的几行写 ablation 分析（典型预期：`no_algebraic` 在 Δ_clos 上爆炸；`no_physics` 在 trajectory 上明显差；`no_L_comm` 几乎不变 → 证明 commutator 是 soft prior）

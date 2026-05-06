@@ -11,7 +11,7 @@ set -euo pipefail
 
 VARIANTS="${VARIANTS:-no_L_clos no_L_inv no_L_comm no_L_hier no_L_nce no_kl_anneal}"
 SEED="${SEED:-0}"
-MAX_EPOCHS="${MAX_EPOCHS:-}"
+MAX_EPOCHS="${MAX_EPOCHS:-80}"        # ablation default: 80 ep (main is 150)
 BATCH_SIZE="${BATCH_SIZE:-8}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-8}"

@@ -142,7 +142,15 @@ class FlatVQVAEDataset(Dataset):
                 poses = poses[idx]
         deltas = pose_to_delta(poses)                                    # [T-1, 7]
 
-        text = task_to_text(entry) if isinstance(entry, dict) else str(entry)
+        # task_to_text expects (task_name, obj_category) — match the
+        # canonical call site in dataload/dataset_a.py.
+        if isinstance(entry, dict):
+            text = task_to_text(
+                entry.get("task_name", ""),
+                entry.get("obj_category", ""),
+            )
+        else:
+            text = str(entry)
         return FlatSample(
             text=text, deltas=deltas, pose0=poses[0],
             traj_id=traj_id,

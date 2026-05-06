@@ -45,16 +45,30 @@ def _run_physgaussian_one(
 
     Returns (success, message).  On failure, message is the exception/error
     string for logging.
+
+    PYTHONPATH:  ``utils.sh_utils`` lives in PhysGaussian's
+    ``gaussian-splatting/`` submodule (NOT in the top-level ``utils/``).
+    We prepend it to PYTHONPATH so ``gs_simulation.py``'s
+    ``from utils.sh_utils import eval_sh`` resolves.
     """
+    import os
     cmd = [
         "python", str(physgs_repo / "gs_simulation.py"),
         "--config",     str(cfg_path),
         "--output_path", str(output_dir),
     ]
+    env = dict(os.environ)
+    extra_paths = [
+        str(physgs_repo / "gaussian-splatting"),     # for utils.sh_utils, scene/, etc.
+        str(physgs_repo),                             # for top-level imports
+    ]
+    env["PYTHONPATH"] = os.pathsep.join(
+        extra_paths + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])
+    )
     try:
         r = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout_secs,
-            cwd=str(physgs_repo),
+            cwd=str(physgs_repo), env=env,
         )
     except subprocess.TimeoutExpired:
         return False, f"timeout after {timeout_secs}s"

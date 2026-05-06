@@ -190,14 +190,85 @@ def _build_initial_scene(
 # Convert trajectory (list of SceneState) → GS4DSequence
 # ══════════════════════════════════════════════════════════════════════
 
-def _trajectory_to_gs4d(trajectory: List[SceneState]) -> GS4DSequence:
-    """Stack a list of T SceneStates into our GS4DSequence format.
+def _trajectory_to_gs4d(
+    trajectory: List[SceneState],
+    init_scene: Optional[SceneState] = None,
+    n_frames_target:  int = 30,
+) -> GS4DSequence:
+    """Stack a list of T_macro SceneStates into our GS4DSequence format,
+    optionally expanded to ``n_frames_target`` via linear interpolation
+    of mu / cov / sh / opacity / scale between consecutive macro-states.
 
-    SceneState has [B=1, K, N_max, ...] shape.  We collapse K and slice
-    the real Gaussians (mask=True) → [T, N_real, ...].
+    Why interpolate?
+    ----------------
+    Our planner emits a hierarchical macro plan (typically 1–5 macro-
+    steps), and ``model.infer_text`` returns one SceneState per macro.
+    But baselines (TAMP, PhysGaussian, MotionGPT) and the GT video are
+    at frame level (~30 frames).  Interpolating between (init,
+    macro_0, macro_1, ..., macro_{T-1}) gives a per-frame trajectory
+    that's directly comparable.
+
+    The interpolation is in linear space — the macro-action is by
+    construction a "displacement" applied to the scene, so a linear
+    trajectory between (scene_t-1, scene_t) is a faithful readout of
+    that single macro-action's intended motion (it's not physically
+    accurate inside the macro, but the *endpoints* are correct, which
+    is what ADE/FDE/PSNR measure).
+
+    Args:
+        trajectory:        list of T_macro SceneStates from infer_text.
+        init_scene:        the initial scene state passed to infer_text.
+                           If None, falls back to "trajectory[0] for both
+                           start and end" (no interpolation possible).
+        n_frames_target:   number of output frames after interpolation.
+                           Defaults to 30 to match GT videos.
     """
-    T = len(trajectory)
-    assert T > 0, "empty trajectory"
+    T_macro = len(trajectory)
+    assert T_macro > 0, "empty trajectory"
+
+    # Build the full anchor sequence: [init_scene, traj_0, traj_1, ...]
+    if init_scene is not None:
+        anchors = [init_scene] + list(trajectory)
+    else:
+        anchors = list(trajectory)
+    n_anchors = len(anchors)
+
+    # If we have enough anchors and don't need interpolation, fall through
+    # to the original code path (no padding, just stack).  This preserves
+    # the old behaviour for T_macro >= n_frames_target.
+    if n_anchors >= n_frames_target or n_frames_target <= 1:
+        T = n_anchors
+        trajectory = anchors  # use init+trajectory anchors directly
+    else:
+        # Linearly interpolate to get `n_frames_target` total frames between
+        # anchors[0] (= init) and anchors[-1] (= last macro state).  We
+        # distribute the n_anchors anchors evenly across the n_frames_target
+        # output positions and lerp on intermediate frames.
+        anchor_positions = np.linspace(0.0, n_frames_target - 1.0, n_anchors)
+        interp_traj: List[SceneState] = []
+        for t_out in range(n_frames_target):
+            # Find which anchor segment t_out falls in
+            seg_idx = int(np.searchsorted(anchor_positions, t_out, side="right") - 1)
+            seg_idx = max(0, min(seg_idx, n_anchors - 2))
+            t_lo, t_hi = anchor_positions[seg_idx], anchor_positions[seg_idx + 1]
+            alpha = float((t_out - t_lo) / max(t_hi - t_lo, 1e-6))
+            alpha = float(np.clip(alpha, 0.0, 1.0))
+            s_lo = anchors[seg_idx]
+            s_hi = anchors[seg_idx + 1]
+            # LERP each tensor field (mu / cov / sh / opacity / scale).
+            # We build a fresh SceneState; mask/phi/R_obj_world reuse s_hi.
+            from dataclasses import replace
+            interp = replace(
+                s_hi,
+                mu=      (1 - alpha) * s_lo.mu      + alpha * s_hi.mu,
+                cov=     (1 - alpha) * s_lo.cov     + alpha * s_hi.cov,
+                sh=      (1 - alpha) * s_lo.sh      + alpha * s_hi.sh,
+                opacity=(1 - alpha) * s_lo.opacity + alpha * s_hi.opacity,
+                scale=  (1 - alpha) * s_lo.scale   + alpha * s_hi.scale,
+            )
+            interp_traj.append(interp)
+        T = n_frames_target
+        trajectory = interp_traj
 
     # Determine a consistent N from the first scene's mask
     s0 = trajectory[0]
@@ -283,7 +354,10 @@ def infer_one(
     trajectory = out.get("trajectory")
     if not trajectory:
         return None
-    return _trajectory_to_gs4d(trajectory)
+    # Pass the initial scene so _trajectory_to_gs4d can interpolate between
+    # init and macro-states to produce a 30-frame trajectory (matches GT
+    # video length and other baselines).
+    return _trajectory_to_gs4d(trajectory, init_scene=scene, n_frames_target=30)
 
 
 # ══════════════════════════════════════════════════════════════════════

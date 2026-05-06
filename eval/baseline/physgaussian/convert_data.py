@@ -23,7 +23,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from ..common import (
     baseline_output_dir,
@@ -33,28 +33,29 @@ from ..common import (
 from .rho_to_config import default_rho_for_partnet_object, rho_to_physgaussian_config
 
 
-def _extract_rho_from_physics_json(p: dict) -> list[float] | None:
+def _extract_rho_from_physics_json(p: dict, obj_category: str) -> Optional[List[float]]:
     """Build the 9-tuple ρ from our actual physics.json schema.
 
     Confirmed schema (from CAP/dataset/dataset_a/data/<traj_id>/physics.json):
         {"friction": float, "damping": float}
 
-    The remaining 7 slots (E, ν, ρ_m, F[3], dt) are NOT in physics.json — we
-    use category-aware defaults (PartNet objects are mostly metallic rigid).
+    The remaining 7 slots (E, ν, ρ_m, F[3], dt) come from a category-aware
+    default (PartNet-Mobility objects are mostly metallic rigid; soft
+    Cloth/SoftToy use jelly defaults — see ``default_rho_for_partnet_object``).
+
+    F[3] is the EXTERNAL force vector (NOT gravity — gravity goes in
+    ``g`` separately in PhysGaussian's config).  Default is [0, 0, 0]
+    so PartNet objects under PhysGaussian are pulled by gravity only,
+    matching the simulator's natural settle behavior.
     """
     if not isinstance(p, dict):
         return None
     if "friction" not in p or "damping" not in p:
         return None
-    # Default: metal-like rigid + gravity + 30fps timestep
-    E, nu, rho_m = 2.0e11, 0.30, 7800.0
-    fx, fy, fz   = 0.0, 0.0, -9.81
-    dt           = 1.0 / 30.0
-    return [
-        E, nu, rho_m,
-        fx, fy, fz,
-        float(p["friction"]), float(p["damping"]), dt,
-    ]
+    base = list(default_rho_for_partnet_object(obj_category))
+    base[6] = float(p["friction"])     # μ
+    base[7] = float(p["damping"])      # damping
+    return base
 
 
 def main(argv: List[str] | None = None) -> int:
@@ -77,11 +78,12 @@ def main(argv: List[str] | None = None) -> int:
             args.manifest, args.data_dir, split,
         ):
             n_total += 1
+            obj_cat = entry.get("obj_category", "")
             phy = load_physics_json(traj_dir)
-            rho = _extract_rho_from_physics_json(phy) if phy else None
+            rho = _extract_rho_from_physics_json(phy, obj_cat) if phy else None
 
             if rho is None:
-                rho = list(default_rho_for_partnet_object(entry.get("obj_category")))
+                rho = list(default_rho_for_partnet_object(obj_cat))
                 n_fallback += 1
             else:
                 n_with_gt_rho += 1

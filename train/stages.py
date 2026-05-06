@@ -151,7 +151,7 @@ SMOKE_STAGES: List[StageSpec] = [
 # without forgetting.  Single stage with low lr keeps changes incremental.
 DATASET_B_STAGES: List[StageSpec] = [
     StageSpec(
-        name="FINETUNE_B", epochs=30, lr=3e-5,           # PDF "微调" → low lr
+        name="FINETUNE_B", epochs=50, lr=3e-5,           # PDF "微调" → low lr; A (150ep) + B (50ep) = 200
         encoder=True, planner=True, executor=True, deform_only=False,
         enable_physics=True,
         run_planner=True,

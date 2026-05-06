@@ -78,4 +78,5 @@ training:
   tau_schedule:
     start: 0.1
     end:   0.05
-    anneal_epochs: 15      # finish anneal in first half of B's 30-epoch run
+    anneal_epochs: 15      # B is 50 ep total; anneal in first 30% then commit
+                           # at low tau for the remaining 35 ep (A+B = 200 ep)

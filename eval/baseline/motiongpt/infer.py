@@ -191,7 +191,7 @@ def main(argv: List[str] | None = None) -> int:
                     z = np.load(npz, allow_pickle=False)
                     if "object_pose_world" in z.files:
                         pose0 = z["object_pose_world"][0].astype(np.float32)
-                poses = delta_to_pose(deltas, pose0)
+                poses = delta_to_pose(pose0, deltas)
 
                 # 4) Apply pose trajectory → 4DGS
                 gs = load_init_gs_ply(traj_dir / "init_gs.ply",

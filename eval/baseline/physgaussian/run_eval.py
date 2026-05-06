@@ -156,6 +156,20 @@ def _patch_physgs_config(orig_path: Path, dst_path: Path, xform: dict) -> None:
         },
     ]
 
+    # ── MPM stability clamp ────────────────────────────────────────────
+    # PartNet ρ values (E up to 1e8) blow up MPM with the default
+    # substep_dt=1e-4 (CFL: dt < dx / sqrt(E/ρ)).  Clamp to PhysGaussian
+    # ficus/wolf-tested ranges — baseline goal is "doesn't crash", not
+    # "physically calibrated".  We document the clamp in the metrics
+    # ``notes`` field so downstream analysis can flag it.
+    orig_E = float(cfg.get("E", 1e6))
+    orig_dt = float(cfg.get("substep_dt", 1e-4))
+    cfg["E"] = float(np.clip(orig_E, 1e3, 5e6))    # ficus is 2e6, wolf 5e7
+    cfg["nu"] = float(np.clip(cfg.get("nu", 0.3), 0.0, 0.45))
+    cfg["density"] = float(np.clip(cfg.get("density", 200.0), 50.0, 2000.0))
+    cfg["substep_dt"] = min(orig_dt, 5e-5)         # safer for clamped E
+    cfg.setdefault("n_grid", 100)                  # ficus default-ish
+
     # Strip our bookkeeping fields — PhysGaussian's decode_param.py may
     # not tolerate extras depending on the version.
     for k in ("model_path", "traj_id", "dataset", "split"):

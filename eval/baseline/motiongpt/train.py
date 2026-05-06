@@ -1,20 +1,30 @@
-"""Fine-tune T5 on (text → motion-token sequence) for the MotionGPT baseline.
+"""MotionGPT baseline training — two-stage, single CLI.
 
-Two-stage approach:
-  1. Reuse the FlatVQVAE motion VQ-codebook (pre-trained on our pose deltas)
-     as the motion vocabulary.
-  2. Extend T5's tokenizer with K motion tokens + 2 special markers.
-  3. Fine-tune T5 to predict (text → <motion_start> <m_x> ... <motion_end>).
+Stage 1 (``--stage vqvae``): train ``FlatVQVAE`` on per-frame pose deltas
+        (≈ 50K params, converges in a few hundred steps).
 
-T5 is loaded from HuggingFace (``t5-small`` by default — fits ~60M params).
-For our small dataset (~1650 samples), this is intentional to avoid overfit.
+Stage 2 (``--stage t5``): extend T5's tokenizer with K motion tokens
+        + 2 special markers, fine-tune T5 to predict
+        (text → <motion_start> <m_x> ... <motion_end>) using the motion
+        IDs the (frozen) VQ-VAE produces from each pose delta.
+
+T5 backbone defaults to ``t5-small`` (~60M params) — for our ~1650-sample
+training set this is intentional to avoid overfit on tiny data.
 
 Usage:
 
-    python -m eval.baseline.motiongpt.train \\
+    # Stage 1: motion VQ-VAE
+    python -m eval.baseline.motiongpt.train --stage vqvae \\
         --manifest dataset/dataset_a/manifest.json \\
         --data-dir dataset/dataset_a/data \\
-        --vqvae-ckpt runs/baselines/flat_vqvae/dataset_a/vqvae/ckpt_final.pt \\
+        --output-dir runs/baselines/motiongpt/dataset_a/vqvae \\
+        --epochs 50
+
+    # Stage 2: T5 fine-tune (uses Stage-1 ckpt)
+    python -m eval.baseline.motiongpt.train --stage t5 \\
+        --manifest dataset/dataset_a/manifest.json \\
+        --data-dir dataset/dataset_a/data \\
+        --vqvae-ckpt runs/baselines/motiongpt/dataset_a/vqvae/ckpt_final.pt \\
         --t5-name t5-small \\
         --output-dir runs/baselines/motiongpt/dataset_a/t5 \\
         --epochs 30
@@ -30,13 +40,16 @@ from typing import List
 
 import torch
 import torch.distributed as dist
+import torch.nn.functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
 
-from ..flat_vqvae.vqvae import FlatVQVAE
+from .vqvae import FlatVQVAE
 from .data import (
+    FlatVQVAEDataset,
     MGSpecialTokens,
     MotionGPTDataset,
+    collate_flat,
     collate_mg,
     format_input_text,
     format_target_motion,
@@ -76,6 +89,63 @@ def extend_tokenizer(tokenizer, K: int, specials: MGSpecialTokens = MGSpecialTok
 # ──────────────────────────────────────────────────────────────────────
 # Training loop
 # ──────────────────────────────────────────────────────────────────────
+
+def train_vqvae(args, is_ddp, rank, device, is_main) -> int:
+    """Stage 1: train the per-frame motion VQ-VAE on pose deltas."""
+    out_dir = Path(args.output_dir); out_dir.mkdir(parents=True, exist_ok=True)
+
+    ds = FlatVQVAEDataset(args.manifest, args.data_dir, split="train", T=args.T)
+    sampler = DistributedSampler(ds, seed=args.seed) if is_ddp else None
+    loader = DataLoader(
+        ds, batch_size=args.batch_size, shuffle=(sampler is None), sampler=sampler,
+        num_workers=args.num_workers, collate_fn=collate_flat,
+        pin_memory=True, drop_last=True,
+        persistent_workers=(args.num_workers > 0), prefetch_factor=2,
+    )
+    if is_main:
+        print(f"VQ-VAE  samples={len(ds)}  steps/epoch={len(loader)}")
+
+    model = FlatVQVAE(in_dim=7, hidden=args.vq_hidden,
+                      code_dim=args.vq_code_dim, K=args.vq_K).to(device)
+    if is_ddp:
+        model = DDP(model, device_ids=[device.index], find_unused_parameters=False)
+
+    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.99))
+
+    global_step = 0
+    for epoch in range(args.epochs):
+        if sampler is not None:
+            sampler.set_epoch(epoch)
+        t0 = time.time(); total_loss = 0.0; total_recon = 0.0; n = 0
+        for batch in loader:
+            deltas = batch["deltas"].to(device, non_blocking=True)        # [B, T-1, 7]
+
+            opt.zero_grad(set_to_none=True)
+            recon, _ids, vq_loss = model(deltas)
+            recon_loss = F.mse_loss(recon, deltas)
+            loss = recon_loss + vq_loss
+            loss.backward()
+            opt.step()
+
+            total_loss += float(loss.item()); total_recon += float(recon_loss.item())
+            n += 1; global_step += 1
+            if is_main and global_step % args.log_every == 0:
+                print(f"[vq epoch={epoch} step={global_step}] "
+                      f"loss={loss.item():.4f}  recon={recon_loss.item():.4f}  "
+                      f"vq={vq_loss.item():.4f}")
+        if is_main:
+            print(f"  epoch {epoch + 1}/{args.epochs}  "
+                  f"avg_loss={total_loss/max(n,1):.4f}  "
+                  f"avg_recon={total_recon/max(n,1):.4f}  "
+                  f"dt={time.time()-t0:.1f}s")
+
+    if is_main:
+        target = model.module if hasattr(model, "module") else model
+        torch.save({"model": target.state_dict(), "args": vars(args)},
+                   out_dir / "ckpt_final.pt")
+        print(f"  ✔ saved {out_dir/'ckpt_final.pt'}")
+    return global_step
+
 
 def train_motiongpt(args, is_ddp, rank, device, is_main) -> int:
     out_dir = Path(args.output_dir); out_dir.mkdir(parents=True, exist_ok=True)
@@ -194,28 +264,49 @@ def train_motiongpt(args, is_ddp, rank, device, is_main) -> int:
 
 def main(argv: List[str] | None = None) -> int:
     p = argparse.ArgumentParser()
+    p.add_argument("--stage", choices=["vqvae", "t5"], required=True,
+                   help="vqvae: train motion VQ-VAE; t5: fine-tune T5")
     p.add_argument("--manifest", required=True)
     p.add_argument("--data-dir", required=True)
     p.add_argument("--output-dir", required=True)
-    p.add_argument("--vqvae-ckpt", required=True,
-                   help="path to FlatVQVAE ckpt (motion vocabulary source)")
+    # Stage 2 (t5) only — path to the Stage-1 ckpt
+    p.add_argument("--vqvae-ckpt", default=None,
+                   help="path to FlatVQVAE ckpt (required for --stage t5)")
     p.add_argument("--t5-name",    default="t5-small",
                    help="HuggingFace T5 variant: t5-small / t5-base / t5-large")
     p.add_argument("--T",          type=int, default=30)
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--num-workers",type=int, default=4)
-    p.add_argument("--epochs",     type=int, default=30)
-    p.add_argument("--lr",         type=float, default=5e-5,
-                   help="T5 fine-tune LR; smaller than VQ-VAE since pretrained")
+    p.add_argument("--epochs",     type=int, default=None,
+                   help="default: 50 for vqvae stage, 30 for t5 stage")
+    p.add_argument("--lr",         type=float, default=None,
+                   help="default: 1e-3 for vqvae, 5e-5 for t5")
     p.add_argument("--seed",       type=int, default=0)
     p.add_argument("--log-every",  type=int, default=20)
+    # VQ-VAE hyperparams (Stage 1)
+    p.add_argument("--vq-K",         type=int, default=64,
+                   help="motion codebook size")
+    p.add_argument("--vq-code-dim",  type=int, default=32)
+    p.add_argument("--vq-hidden",    type=int, default=128)
     args = p.parse_args(argv)
+
+    # Apply stage-aware defaults
+    if args.epochs is None:
+        args.epochs = 50 if args.stage == "vqvae" else 30
+    if args.lr is None:
+        args.lr = 1e-3 if args.stage == "vqvae" else 5e-5
 
     is_ddp, rank, local_rank = _setup_ddp()
     device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
     is_main = (rank == 0)
 
-    train_motiongpt(args, is_ddp, rank, device, is_main)
+    if args.stage == "vqvae":
+        train_vqvae(args, is_ddp, rank, device, is_main)
+    else:
+        if args.vqvae_ckpt is None:
+            raise SystemExit("--vqvae-ckpt is required for --stage t5")
+        train_motiongpt(args, is_ddp, rank, device, is_main)
+
     _cleanup_ddp()
     return 0
 

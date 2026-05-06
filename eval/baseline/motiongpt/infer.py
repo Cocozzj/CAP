@@ -39,10 +39,9 @@ from ..common import (
     baseline_output_dir,
     iter_split_entries,
 )
-from ..flat_vqvae.data  import delta_to_pose
-from ..flat_vqvae.vqvae import FlatVQVAE
-from ..kinematics       import apply_pose_trajectory_to_gs, quat_log_scale_to_full_cov
-from .data import MGSpecialTokens, format_input_text, parse_motion_ids_from_text
+from ..kinematics import apply_pose_trajectory_to_gs, quat_log_scale_to_full_cov
+from .data  import MGSpecialTokens, format_input_text, parse_motion_ids_from_text, delta_to_pose
+from .vqvae import FlatVQVAE
 
 
 # ──────────────────────────────────────────────────────────────────────

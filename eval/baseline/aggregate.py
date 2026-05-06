@@ -131,6 +131,25 @@ def _evaluate_trajectory(
 
     m = compute_all_metrics(seq, gt_centers)
 
+    # ── Override ADE / FDE / MPJPE / Success with task-aware part-level
+    #    metrics (compares moving-part centroid + keypoints under URDF
+    #    forward-kinematics, not the full Gaussian cloud against a static
+    #    object_pose-derived GT).  See eval.baseline.task_metrics. ──
+    try:
+        from .task_metrics import compute_task_metrics
+        task = compute_task_metrics(np.asarray(seq.mu), traj_dir)
+        for f in ("ade", "fde", "mpjpe", "success"):
+            v = task.get(f)
+            if v is not None:
+                setattr(m, f, v)
+    except Exception as e:
+        # Don't crash the whole pipeline on per-traj task-metric failure
+        # (URDF missing, malformed meta, etc.) — log and continue.
+        if not getattr(_evaluate_trajectory, "_warned", False):
+            print(f"  ⚠ task_metrics failed for {traj_dir.name}: "
+                  f"{type(e).__name__}: {e} (further warnings suppressed)")
+            _evaluate_trajectory._warned = True
+
     # Preserve fields written by other eval scripts (psnr/lpips/closure_gap, etc.)
     if metrics_path.exists():
         try:

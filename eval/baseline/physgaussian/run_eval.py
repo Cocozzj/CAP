@@ -411,6 +411,11 @@ def main(argv: List[str] | None = None) -> int:
     p.add_argument("--timeout", type=int, default=600,
                    help="per-trajectory timeout (PhysGaussian sims can hang on degenerate input)")
     p.add_argument("--limit", type=int, default=None)
+    p.add_argument("--skip-existing", action="store_true",
+                   help="skip trajectories that already have pred_4dgs.npz "
+                        "(useful for resuming a partial run; together with "
+                        "removing failed metrics.json files this lets us "
+                        "redo only the failed subset)")
     # Sharded execution: split trajectories deterministically across N
     # workers so several can run in parallel on different GPUs.  Worker i
     # processes traj at index j whenever (j % num_shards) == shard_index.
@@ -458,6 +463,9 @@ def main(argv: List[str] | None = None) -> int:
             if not cfg_path.exists():
                 print(f"  ⊘ {traj_dir.name}: no physgs_config.json (run convert_data first)")
                 failed += 1
+                continue
+            if args.skip_existing and (traj_dir / "pred_4dgs.npz").exists():
+                # Already-successful traj — skip without counting as ok/fail.
                 continue
 
             # PhysGaussian writes its outputs into a subdir of traj_dir

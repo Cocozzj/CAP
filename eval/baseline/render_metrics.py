@@ -312,7 +312,7 @@ def evaluate_one(
 def main(argv: List[str] | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--baselines", nargs="+",
-                   default=["tamp_pddl", "physgaussian", "physdreamer",
+                   default=["tamp_pddl", "physgaussian", "svd",
                             "magvit_v2", "motiongpt", "ours"])
     p.add_argument("--output-root", default="runs/baselines")
     p.add_argument("--data-root", default="dataset")
@@ -330,7 +330,9 @@ def main(argv: List[str] | None = None) -> int:
     t0 = time.time()
 
     for baseline in args.baselines:
-        is_pixel_only = (baseline == "magvit_v2")
+        # Pixel-only baselines write pred_render.mp4 (no 3D output).  We
+        # compare frames directly to GT cam0 instead of rendering preds.
+        is_pixel_only = baseline in ("magvit_v2", "svd")
         for dataset in args.datasets:
             base = out_root / baseline / dataset
             if not base.exists():

@@ -49,7 +49,12 @@ _PAPER_NAME = {
     # renamed to reflect this honestly; a footnote in the paper explains.
     "tamp_pddl":    "Symbolic + Motion Primitives",
     "physgaussian": "PhysGaussian",
-    "physdreamer":  "PhysDreamer",
+    # Generic image-to-video diffusion prior (Blattmann et al. 2023),
+    # zero-shot — pixel output only, no 3D, so 3D metric columns render
+    # as "—" for this row.  See eval/baseline/svd/README.md.  PhysDreamer
+    # is not included; its per-scene optimization at ~30 min/traj is
+    # infeasible at our 1300+ trajectory evaluation scale.
+    "svd":          "Stable Video Diffusion",
     "magvit_v2":    "MAGVIT-v2",
     "motiongpt":    "MotionGPT",
     "ours":         "\\textbf{Ours}",

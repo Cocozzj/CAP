@@ -308,9 +308,13 @@ def print_table(table: Dict, output_path: Path | str | None = None) -> str:
 def main(argv: List[str] | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--baselines", nargs="+",
-                   default=["tamp_pddl", "physgaussian", "physdreamer",
+                   default=["tamp_pddl", "physgaussian", "svd",
                             "magvit_v2", "motiongpt", "ours"],
-                   help="which baselines to aggregate (paper's 5 external baselines + Ours)")
+                   help="which baselines to aggregate (paper's 5 external "
+                        "baselines + Ours).  'svd' is a generic video-"
+                        "diffusion baseline — see eval/baseline/svd/README.md "
+                        "(PhysDreamer is excluded due to its per-scene "
+                        "optimization cost being infeasible at our scale).")
     p.add_argument("--output-root", default="runs/baselines")
     p.add_argument("--data-root", default="dataset",
                    help="root containing dataset_a/data/<traj>, dataset_b/data/<traj>")

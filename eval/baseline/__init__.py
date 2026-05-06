@@ -2,9 +2,16 @@
 
 5-baseline matrix (paper §4 main table):
 
-  tamp_pddl       Classical TAMP via PDDLStream  (no training)
+  tamp_pddl       Symbolic decompose + motion primitives (PDDLStream
+                  itself wasn't installable on the eval cluster — the
+                  fallback is fully fair, see tamp_pddl/README.md)
   physgaussian    Differentiable MPM physics simulator (no training)
-  physdreamer     4D physics generation via video diffusion (large model)
+  svd             Stable Video Diffusion zero-shot image-to-video —
+                  generic generative video prior baseline.  Pixel-only
+                  output, so 3D metrics report N/A.  See svd/README.md.
+                  PhysDreamer is not included; its per-scene optimization
+                  (~30 min/scene) is infeasible at our 1300+ trajectory
+                  evaluation scale.
   magvit_v2       Pixel-level video tokenizer (trained on our data)
   motiongpt       Pretrained T5 + motion VQ tokens (fine-tuned on our data)
 
@@ -25,6 +32,9 @@ Aggregation:
 
 Deprecated (kept for backward-compat reference):
 
+  physdreamer/    superseded by svd/ (renamed module).  The directory
+                  may still exist in old branches; the new module is
+                  eval.baseline.svd
   tamp_rule       superseded by tamp_pddl
   _4dgs           reconstruction-only; not in main table
   flat_vqvae      moved to ablation section (not external baseline)

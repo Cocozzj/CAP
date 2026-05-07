@@ -233,12 +233,27 @@ def main(argv: List[str] | None = None) -> int:
     with open(args.loss_config) as f:
         loss_cfg = yaml.safe_load(f)["loss"]
 
-    from dataload import build_dataloader
-    train_loader = build_dataloader(
-        cfg, args.manifest, args.data_dir, split="train",
-        batch_size=args.batch_size, shuffle=True, num_workers=4,
+    # Project uses DatasetA / DatasetB classes + collate_batch (see
+    # train/trainer.py::build_dataset / _build_model_and_data).
+    from dataload import DatasetA, collate_batch
+    sh_dim = int(cfg["gs_param"]["gs_dimension"]) - 11
+    T_train  = int(cfg.get("data", {}).get("T", 30))
+    image_sz = int(cfg.get("data", {}).get("image_size", 256))
+    train_set = DatasetA(
+        manifest_path = args.manifest,
+        data_dir      = args.data_dir,
+        split         = "train",
+        T             = T_train,
+        image_size    = image_sz,
+        c_sh          = sh_dim,
     )
-    print(f"\n⏬ train_loader: {len(train_loader)} steps/epoch")
+    train_loader = DataLoader(
+        train_set, batch_size=args.batch_size, shuffle=True,
+        num_workers=4, collate_fn=collate_batch,
+        pin_memory=True, drop_last=True,
+        persistent_workers=True, prefetch_factor=2,
+    )
+    print(f"\n⏬ train_loader: {len(train_loader)} steps/epoch  ({len(train_set)} samples)")
 
     # 6. Optimizer (only trainable params)
     opt = torch.optim.AdamW(
@@ -246,13 +261,24 @@ def main(argv: List[str] | None = None) -> int:
         lr=args.lr, betas=(0.9, 0.99), weight_decay=0.01,
     )
 
-    # 7. Loss module (uses our patched lambda_nce, lambda_nce_preVQ, etc.)
-    from model.loss import CAPLoss, LossSpec
-    loss_spec = LossSpec(enable_hier=True)        # use everything
-    cap_loss = CAPLoss(loss_spec)
+    # 7. Loss module — match trainer.py call signature
+    from model.loss import CAPLoss
+    from train.stages import StageSpec
+    cap_loss = CAPLoss(cfg=loss_cfg)
+    # Pretend we're in the FULL stage so all loss flags are on.  Render is
+    # disabled (render_n_timesteps=0) because we only fine-tune planner;
+    # rendering wastes compute and we don't need the visual loss for fix.
+    spec = StageSpec(
+        name="FIX_PLANNER", epochs=args.epochs, lr=args.lr,
+        encoder=False, planner=True, executor=False,
+        enable_physics=False, run_planner=True,
+        render_n_timesteps=0,        # skip rendering — fastest path
+    )
+    spec.loss.enable_hier = True
 
-    # 8. Training loop
+    # 8. Training loop — mirrors trainer.train_epoch
     print(f"\n⏬ training for {args.epochs} epochs on {device}")
+    total_steps = args.epochs * len(train_loader)
     global_step = 0
     for epoch in range(args.epochs):
         t0 = time.time()
@@ -262,24 +288,47 @@ def main(argv: List[str] | None = None) -> int:
         for batch in train_loader:
             global_step += 1
             n_steps += 1
+
+            frames    = batch["frames"].to(device, non_blocking=True)
+            gs_params = [g.to(device=device) for g in batch["gs_params"]]
+            condition = {
+                "texts":              batch.get("text"),
+                "sample_prob":        0.0,
+                "render_n_timesteps": 0,
+            }
+            cameras = None
+            if "intrinsics" in batch and "extrinsics" in batch:
+                cameras = {
+                    "intrinsics": batch["intrinsics"].to(device, non_blocking=True),
+                    "extrinsics": batch["extrinsics"].to(device, non_blocking=True),
+                }
+
             opt.zero_grad(set_to_none=True)
             try:
-                model_out = model.forward(
-                    frames     = batch["frames"].to(device),
-                    gs_params  = {k: v.to(device) for k, v in batch["gs_params"].items()},
-                    enable_physics = False,
-                    text_labels    = batch.get("text_labels"),
-                    token_indices  = batch.get("token_indices", None),
+                training_out = model(
+                    frames, gs_params=gs_params,
+                    enable_physics=False, run_planner=True,
+                    tau=0.1, condition=condition, cameras=cameras,
                 )
-                losses = cap_loss(model, model_out, loss_cfg, step=global_step,
-                                   total_steps=args.epochs * len(train_loader),
-                                   spec=loss_spec)
+                losses = cap_loss(
+                    model=model, training_out=training_out,
+                    gt={"frames": frames, "depth": None,
+                        "text":   condition["texts"]},
+                    spec=spec.loss,
+                    step=global_step, total_steps=total_steps,
+                )
             except Exception as e:
                 if global_step <= 3:
+                    import traceback
                     print(f"  ⚠ step {global_step} failed: {type(e).__name__}: {e}")
+                    traceback.print_exc()
                 continue
 
             total = losses["total"]
+            if torch.isnan(total).any() or torch.isinf(total).any():
+                if global_step <= 3:
+                    print(f"  ⚠ step {global_step} total NaN/Inf — skip")
+                continue
             total.backward()
             torch.nn.utils.clip_grad_norm_(
                 [p for p in model.parameters() if p.requires_grad], 1.0,
@@ -292,16 +341,24 @@ def main(argv: List[str] | None = None) -> int:
                     sums[k] += float(v.item())
 
             if global_step % 50 == 0:
-                avg = {k: sums[k] / n_steps for k in sums}
+                avg = {k: sums[k] / max(n_steps, 1) for k in sums}
                 print(f"  step {global_step}  total={avg['total']:.4f}  "
                       f"NCE={avg['L_NCE']:.4f}  NCE_pre={avg['L_NCE_preVQ']:.4f}  "
                       f"VQ_task={avg['L_VQ_task']:.4f}  CE={avg['planner_ce']:.4f}")
 
         avg = {k: sums[k] / max(n_steps, 1) for k in sums}
+        # Quick codebook diagnostic each epoch
+        with torch.no_grad():
+            cb = model.planner.task_tok.quantizer.codebook.weight
+            ncb = F.normalize(cb, dim=-1)
+            sim = ncb @ ncb.T
+            mask = ~torch.eye(cb.shape[0], dtype=torch.bool, device=cb.device)
+            cb_sim_mean = sim[mask].mean().item()
         print(f"epoch {epoch + 1}/{args.epochs}  "
               f"total={avg['total']:.4f}  NCE={avg['L_NCE']:.4f}  "
               f"NCE_pre={avg['L_NCE_preVQ']:.4f}  "
               f"VQ_task={avg['L_VQ_task']:.4f}  "
+              f"codebook_cos={cb_sim_mean:.4f}  "
               f"dt={time.time()-t0:.1f}s")
 
         # Save checkpoint each epoch (overwrite final on each)

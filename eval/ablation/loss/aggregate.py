@@ -21,15 +21,15 @@ import variants as variants_mod   # noqa: E402
 
 
 METRICS = [
-    ("algebraic_gaps",     "closure_mean",       "Δ_clos"),
-    ("algebraic_gaps",     "inverse_mean",       "Δ_inv"),
-    ("algebraic_gaps",     "commutator_mean",    "Δ_comm"),
-    ("trajectory_metrics", "ade_mean",           "ADE"),
-    ("trajectory_metrics", "fde_mean",           "FDE"),
-    ("success_rate",       "overall_mean",       "Success"),
-    ("diversity",          "levenshtein_mean",   "Lev"),
-    ("diversity",          "codebook_kl",        "Codebook-KL"),
+    ("algebraic_gaps",     "closure_gap.mean",      "Δ_clos"),
+    ("algebraic_gaps",     "inverse_gap.mean",      "Δ_inv"),
+    ("algebraic_gaps",     "commutator_dev.mean",   "Δ_comm"),
+    ("trajectory_metrics", "ADE.mean",              "ADE"),
+    ("trajectory_metrics", "FDE.mean",              "FDE"),
+    ("success_rate",       "overall_success_rate",  "Success"),
 ]
+
+EVAL_FILENAME = "summary.json"
 
 
 def _read_json(path: Path) -> Optional[Dict[str, Any]]:
@@ -70,7 +70,7 @@ def _format(v: Any) -> str:
 
 
 def collect(eval_a_dir: Path) -> Dict[str, Any]:
-    return {col: _walk(_read_json(eval_a_dir / sub / "results.json"), key)
+    return {col: _walk(_read_json(eval_a_dir / sub / EVAL_FILENAME), key)
             for sub, key, col in METRICS}
 
 

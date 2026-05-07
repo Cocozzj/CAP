@@ -1,6 +1,6 @@
 """aggregate.py — pull eval JSONs across ablation variants → Tab 6 table.
 
-Reads ``runs/module/<variant>/seed_<S>/eval_{a,b}/<eval>/results.json``
+Reads ``runs/module/<variant>/seed_<S>/eval_{a,b}/<eval>/summary.json``
 plus the corresponding ``runs/module/_main/seed_<S>/...`` for the
 unablated baseline, and produces:
 
@@ -36,24 +36,25 @@ import variants as variants_mod   # noqa: E402
 
 
 # ───────────────────────────────────────────────────────────────────────
-# Metric extraction map.  Each entry says: from <eval_subdir>/results.json
-# pull <key path>, name it <column name>.
+# Metric extraction map.  Each entry says: from <eval_subdir>/summary.json
+# pull <key path> (dot-notation walks nested dicts), name it <column>.
 #
-# If you add a new eval, register it here so the table picks it up.
+# Verified key names match the eval scripts' actual JSON output (Apr 2026).
+# Diversity eval skipped — script silently fails (script bug, not aggregator).
 # ───────────────────────────────────────────────────────────────────────
 
 METRICS = [
-    # (eval subdir,         json key path,        column name in table)
-    ("algebraic_gaps",      "closure_mean",       "Δ_clos"),
-    ("algebraic_gaps",      "inverse_mean",       "Δ_inv"),
-    ("algebraic_gaps",      "commutator_mean",    "Δ_comm"),
-    ("trajectory_metrics",  "ade_mean",           "ADE"),
-    ("trajectory_metrics",  "fde_mean",           "FDE"),
-    ("trajectory_metrics",  "mpjpe_mean",         "MPJPE"),
-    ("success_rate",        "overall_mean",       "Success"),
-    ("diversity",           "levenshtein_mean",   "Lev"),
-    ("diversity",           "codebook_kl",        "Codebook-KL"),
+    # (eval subdir,         json dot-path,             column name)
+    ("algebraic_gaps",      "closure_gap.mean",        "Δ_clos"),
+    ("algebraic_gaps",      "inverse_gap.mean",        "Δ_inv"),
+    ("algebraic_gaps",      "commutator_dev.mean",     "Δ_comm"),
+    ("trajectory_metrics",  "ADE.mean",                "ADE"),
+    ("trajectory_metrics",  "FDE.mean",                "FDE"),
+    ("trajectory_metrics",  "MPJPE.mean",              "MPJPE"),
+    ("success_rate",        "overall_success_rate",    "Success"),
 ]
+
+EVAL_FILENAME = "summary.json"
 
 
 def _read_json(path: Path) -> Optional[Dict[str, Any]]:
@@ -124,7 +125,7 @@ def collect_one(eval_dir: Path) -> Dict[str, Any]:
     """For a single eval root (e.g. .../seed_0/eval_a/), pull all metric values."""
     row: Dict[str, Any] = {}
     for sub, key, col in METRICS:
-        j = _read_json(eval_dir / sub / "results.json")
+        j = _read_json(eval_dir / sub / EVAL_FILENAME)
         row[col] = _walk(j, key) if j is not None else None
     return row
 

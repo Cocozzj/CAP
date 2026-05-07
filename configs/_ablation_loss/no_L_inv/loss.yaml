@@ -1,0 +1,36 @@
+loss:
+  lambda_clos: 0.5
+  lambda_inv: 0.0
+  lambda_eq: 0.5
+  lambda_eq_cross: 0.5
+  lambda_comm: 0.01
+  lambda_comm_max: 0.1
+  lambda_rec: 0.2
+  lambda_rec_mse: 0.2
+  lambda_rec_lpips: 0.1
+  lambda_depth: 0.5
+  lambda_nce: 0.1
+  nce_temperature: 0.07
+  lambda_vq_act: 1.0
+  lambda_vq_task: 1.0
+  lambda_cvae_kl: 0.01
+  lambda_cvae_kl_max: 0.1
+  lambda_cvae_recon: 1.0
+  lambda_planner_ce: 1.0
+  lambda_hier: 0.2
+  lambda_lip: 0.01
+  lip_target_C: 2.0
+  lip_epsilon: 0.01
+  lambda_entropy: 0.05
+  entropy_H_min: 3.0
+  entropy_H_max: 8.0
+  lambda_physics: 0.1
+  lambda_physics_vol: 0.5
+  lambda_physics_contact: 1.0
+  lambda_physics_energy: 1.0
+  physics_contact_d_min: 0.01
+training:
+  tau_schedule:
+    start: 1.0
+    end: 0.1
+    anneal_epochs: 30

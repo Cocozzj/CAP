@@ -1,0 +1,8 @@
+variant: no_L_inv
+description:
+  Drop inverse loss alone (Theorem 2: inverse consistency bound). Closure / equivariance still pull toward group structure; isolates the unique contribution of L_inv to the inverse_gap.
+
+config_overrides:
+loss_overrides:
+  loss.lambda_inv: 0.0
+trainer_flags:

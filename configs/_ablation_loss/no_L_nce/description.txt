@@ -1,0 +1,8 @@
+variant: no_L_nce
+description:
+  Drop InfoNCE alignment of task ↔ text (Proposition 5: semantic coherence).  Task token still trained via VQ + CVAE recon, but no contrastive signal to text labels.  Tests whether removing the lower-bound on I(c_task; verb) breaks text-conditional generation correctness.
+
+config_overrides:
+loss_overrides:
+  loss.lambda_nce: 0.0
+trainer_flags:

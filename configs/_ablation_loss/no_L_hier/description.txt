@@ -1,0 +1,8 @@
+variant: no_L_hier
+description:
+  Drop hierarchical consistency loss (Proposition 4: hierarchical algebraic error bound).  Task-tokens still exist but no explicit penalty enforces task↔atomic alignment beyond CVAE training. Tests whether L_hier is the specific term that bounds the decomposition error between task and atomic levels.
+
+config_overrides:
+loss_overrides:
+  loss.lambda_hier: 0.0
+trainer_flags:

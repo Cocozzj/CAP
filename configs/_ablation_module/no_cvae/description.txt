@@ -1,0 +1,11 @@
+variant: no_cvae
+description:
+  w/o CVAE: deterministic Planner — disable KL term and recon term and force greedy decoding, so the latent z collapses to a point and Planner becomes a deterministic seq2seq. Tests whether sampled latent diversity is needed for action variety.
+
+config_overrides:
+  planner.sampling_cfg.deterministic: True
+loss_overrides:
+  loss.lambda_cvae_kl: 0.0
+  loss.lambda_cvae_kl_max: 0.0
+  loss.lambda_cvae_recon: 0.0
+trainer_flags:

@@ -1,0 +1,9 @@
+variant: no_L_eq
+description:
+  Drop equivariance loss alone (Proposition 3: cross-object equivariance bound).  Closure / inverse / commutator still active; tests whether SE(3)-equivariance training is the specific term that drives cross-object transfer accuracy.
+
+config_overrides:
+loss_overrides:
+  loss.lambda_eq: 0.0
+  loss.lambda_eq_cross: 0.0
+trainer_flags:

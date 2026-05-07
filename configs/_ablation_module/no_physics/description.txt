@@ -1,0 +1,10 @@
+variant: no_physics
+description:
+  w/o Physics: enable_physics=False on every stage; the deformation branch falls back to identity (no MPM / PBD / Lipschitz vfield). Tests whether the differentiable physics plugin contributes beyond rigid SE(3) execution alone.
+
+config_overrides:
+loss_overrides:
+  loss.lambda_physics: 0.0
+  loss.lambda_lip: 0.0
+trainer_flags:
+  --no-physics

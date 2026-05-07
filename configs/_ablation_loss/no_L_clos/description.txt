@@ -1,0 +1,8 @@
+variant: no_L_clos
+description:
+  Drop closure loss alone (Theorem 1: closure error bound). Tests whether L_clos is the term that empirically enforces the K^{-1/d} closure-error scaling — closure_gap should rise sharply while inverse_gap and other metrics stay closer to baseline.
+
+config_overrides:
+loss_overrides:
+  loss.lambda_clos: 0.0
+trainer_flags:

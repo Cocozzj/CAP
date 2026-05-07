@@ -1,0 +1,9 @@
+variant: no_hier
+description:
+  w/o Hierarchical: Planner uses LanguageEncoder text_emb directly (no TaskTokenizer / task codebook), so atomic tokens are conditioned on raw text rather than on hierarchical task tokens. Tests whether the J-token bottleneck contributes beyond raw text conditioning.
+
+config_overrides:
+  planner.use_task_token: False
+loss_overrides:
+  loss.lambda_hier: 0.0
+trainer_flags:

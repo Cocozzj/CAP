@@ -1,0 +1,13 @@
+variant: no_algebraic
+description:
+  w/o Algebraic: zero out closure / inverse / equivariance / commutator weights. Atomic tokens still trained via VQ + rec + NCE, but no group-theoretic structure imposed. This is the central ablation — defines the paper's core contribution.
+
+config_overrides:
+loss_overrides:
+  loss.lambda_clos: 0.0
+  loss.lambda_inv: 0.0
+  loss.lambda_eq: 0.0
+  loss.lambda_eq_cross: 0.0
+  loss.lambda_comm: 0.0
+  loss.lambda_comm_max: 0.0
+trainer_flags:

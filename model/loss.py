@@ -950,8 +950,21 @@ class CAPLoss(nn.Module):
             out["mse"], out["lpips"], out["depth"], out["rec_total"] = zero, zero, zero, zero
 
         # ── C. InfoNCE ──────────────────────────────────────────────
-        out["L_NCE"] = (infonce_loss(task_emb, v_proj, cfg["nce_temperature"])
-                        if task_emb is not None else zero)
+        # NCE on BOTH post-VQ (task_emb) and pre-VQ (h_task) for robustness
+        # to codebook collapse.  Post-VQ aligns the discrete task tokens
+        # with text; pre-VQ aligns the continuous projection with text and
+        # is the one that actually keeps lang.proj_head diverse when the
+        # codebook itself collapses (as observed in our seed-0/1/2 runs:
+        # all 128 entries cos-sim > 0.99).  See configs/loss.yaml.
+        h_task_for_nce = plan_out.get("h_task")        # [B, task_dim] pre-VQ
+        out["L_NCE"]       = (
+            infonce_loss(task_emb, v_proj, cfg["nce_temperature"])
+            if (task_emb is not None and v_proj is not None) else zero
+        )
+        out["L_NCE_preVQ"] = (
+            infonce_loss(h_task_for_nce, v_proj, cfg["nce_temperature"])
+            if (h_task_for_nce is not None and v_proj is not None) else zero
+        )
 
         # ── D. Quantisation + planner ───────────────────────────────
         out["L_VQ_act"]  = enc_out.get("vq_loss", zero)
@@ -1034,6 +1047,7 @@ class CAPLoss(nn.Module):
           + comm_w                  * out["L_comm"]
           + cfg["lambda_rec"]      * out["rec_total"]
           + cfg["lambda_nce"]      * out["L_NCE"]
+          + cfg.get("lambda_nce_preVQ", 0.0) * out.get("L_NCE_preVQ", zero)
           + cfg["lambda_vq_act"]   * out["L_VQ_act"]
           + cfg["lambda_vq_task"]  * out["L_VQ_task"]
           + out["planner_total"]                         # already weighted internally

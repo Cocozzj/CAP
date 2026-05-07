@@ -15,11 +15,21 @@ loss:
   lambda_rec_lpips:       0.1       # PDF (lambda_lpips = 0.1)
   lambda_depth:           0.5
   # C. Semantic alignment
-  lambda_nce:             0.1       # PDF (was 0.3)
+  # NCE was 0.1 → planner mode collapse: task_codebook all 128 entries
+  # collapsed to cosine sim 0.99+, all texts mapped to same task_id.  Bumped
+  # to 1.0 for the planner-stage fine-tune that recovers from that collapse.
+  # See fix_planner_finetune.py.
+  lambda_nce:             1.0       # was 0.1 (PDF: 0.3)
   nce_temperature:        0.07
+  # NCE applied on PRE-VQ text_emb / h_task as well as POST-VQ task_emb so the
+  # diversity signal reaches lang.proj_head and task_tok directly even when
+  # quantization collapses.  Same temperature.
+  lambda_nce_preVQ:       1.0       # NEW
   # D. Quantization & planning
+  # lambda_vq_task reduced 1.0 → 0.3 to avoid the "VQ commitment crushes
+  # everything to one entry" failure mode that caused codebook collapse.
   lambda_vq_act:          1.0       # standard VQ commitment (PDF unspecified)
-  lambda_vq_task:         1.0       # standard VQ commitment (PDF unspecified)
+  lambda_vq_task:         0.3       # was 1.0; relaxed to permit codebook diversity
   lambda_cvae_kl:         0.01      # base; β anneal 0.01→0.1 in Stage-2 (PDF: fixed β=0.1)
   lambda_cvae_kl_max:     0.1       # anneal endpoint = PDF's β value
   lambda_cvae_recon:      1.0
@@ -32,7 +42,7 @@ loss:
                                   # → NaN params.  Re-raise once vfield stable.
   lip_target_C:           2.0
   lip_epsilon:            0.01
-  lambda_entropy:         0.05      # codebook entropy — Stage-2 only
+  lambda_entropy:         0.30      # was 0.05; 6× to keep codebook spread out
   entropy_H_min:          3.0
   entropy_H_max:          8.0
   lambda_physics:         0.1       # PDF (was 0.5)

@@ -187,6 +187,11 @@ def main(argv: List[str] | None = None) -> int:
     p.add_argument("--batch-size", type=int, default=8)
     p.add_argument("--lr",       type=float, default=2e-4)
     p.add_argument("--seed",     type=int, default=0)
+    p.add_argument("--fp16", action="store_true",
+                   help="use mixed-precision (autocast bf16) to halve memory")
+    p.add_argument("--grad-accum", type=int, default=1,
+                   help="accumulate gradients over N microbatches "
+                        "(effective batch = batch_size × grad_accum)")
     args = p.parse_args(argv)
 
     random.seed(args.seed); np.random.seed(args.seed); torch.manual_seed(args.seed)
@@ -303,20 +308,31 @@ def main(argv: List[str] | None = None) -> int:
                     "extrinsics": batch["extrinsics"].to(device, non_blocking=True),
                 }
 
-            opt.zero_grad(set_to_none=True)
+            if (global_step - 1) % args.grad_accum == 0:
+                opt.zero_grad(set_to_none=True)
             try:
-                training_out = model(
-                    frames, gs_params=gs_params,
-                    enable_physics=False, run_planner=True,
-                    tau=0.1, condition=condition, cameras=cameras,
-                )
-                losses = cap_loss(
-                    model=model, training_out=training_out,
-                    gt={"frames": frames, "depth": None,
-                        "text":   condition["texts"]},
-                    spec=spec.loss,
-                    step=global_step, total_steps=total_steps,
-                )
+                amp_ctx = (torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
+                           if args.fp16 else torch.amp.autocast(device_type="cuda", enabled=False))
+                with amp_ctx:
+                    training_out = model(
+                        frames, gs_params=gs_params,
+                        enable_physics=False, run_planner=True,
+                        tau=0.1, condition=condition, cameras=cameras,
+                    )
+                    losses = cap_loss(
+                        model=model, training_out=training_out,
+                        gt={"frames": frames, "depth": None,
+                            "text":   condition["texts"]},
+                        spec=spec.loss,
+                        step=global_step, total_steps=total_steps,
+                    )
+            except torch.cuda.OutOfMemoryError as e:
+                # Free fragmented memory and skip this step (don't crash the
+                # whole job; codebook reset already advanced).
+                torch.cuda.empty_cache()
+                if global_step <= 5:
+                    print(f"  ⚠ step {global_step} OOM (skipped): {e}")
+                continue
             except Exception as e:
                 if global_step <= 3:
                     import traceback
@@ -324,16 +340,17 @@ def main(argv: List[str] | None = None) -> int:
                     traceback.print_exc()
                 continue
 
-            total = losses["total"]
+            total = losses["total"] / args.grad_accum
             if torch.isnan(total).any() or torch.isinf(total).any():
                 if global_step <= 3:
                     print(f"  ⚠ step {global_step} total NaN/Inf — skip")
                 continue
             total.backward()
-            torch.nn.utils.clip_grad_norm_(
-                [p for p in model.parameters() if p.requires_grad], 1.0,
-            )
-            opt.step()
+            if global_step % args.grad_accum == 0:
+                torch.nn.utils.clip_grad_norm_(
+                    [p for p in model.parameters() if p.requires_grad], 1.0,
+                )
+                opt.step()
 
             for k in sums:
                 v = losses.get(k)
